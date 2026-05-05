@@ -104,7 +104,8 @@ curl -fsSL https://install.opensre.com | bash -s -- --main
 ```
 
 ```bash
-brew install Tracer-Cloud/opensre/opensre
+brew tap tracer-cloud/tap
+brew install tracer-cloud/tap/opensre
 ```
 
 ```powershell
@@ -124,6 +125,7 @@ pipx install opensre
 opensre onboard
 opensre investigate -i tests/e2e/kubernetes/fixtures/datadog_k8s_alert.json
 opensre update
+opensre uninstall   # remove opensre and all local data
 ```
 
 ### Interactive mode
@@ -215,6 +217,8 @@ opensre remote ops logs --follow
 ## Development
 
 > **New to OpenSRE?** See [SETUP.md](SETUP.md) for detailed platform-specific setup instructions, including Windows setup, environment configuration, and more.
+
+Local development installs use [uv](https://docs.astral.sh/uv/getting-started/installation/) and a committed `uv.lock` (`make install` runs `uv sync --frozen --extra dev`). Install uv first, then:
 
 ```bash
 git clone https://github.com/Tracer-Cloud/opensre
@@ -1180,6 +1184,124 @@ Thanks goes to these amazing people:
             <sub><b>AniketR10</b></sub>
         </a>
     </td>
+            <td align="center">
+        <a href="https://github.com/Jai0401">
+            <img src="https://avatars.githubusercontent.com/u/112328542?v=4" width="100" alt="Jai0401"/>
+            <br />
+            <sub><b>Jai0401</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/shivambehl">
+            <img src="https://avatars.githubusercontent.com/u/41379568?v=4" width="100" alt="shivambehl"/>
+            <br />
+            <sub><b>shivambehl</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/retr0-kernel">
+            <img src="https://avatars.githubusercontent.com/u/82054542?v=4" width="100" alt="retr0-kernel"/>
+            <br />
+            <sub><b>retr0-kernel</b></sub>
+        </a>
+    </td>
+		</tr>
+		<tr>
+            <td align="center">
+        <a href="https://github.com/IsaacOdeimor">
+            <img src="https://avatars.githubusercontent.com/u/218982227?v=4" width="100" alt="IsaacOdeimor"/>
+            <br />
+            <sub><b>IsaacOdeimor</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/RajGajjar-01">
+            <img src="https://avatars.githubusercontent.com/u/153660066?v=4" width="100" alt="RajGajjar-01"/>
+            <br />
+            <sub><b>RajGajjar-01</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/4arjun">
+            <img src="https://avatars.githubusercontent.com/u/144534911?v=4" width="100" alt="4arjun"/>
+            <br />
+            <sub><b>4arjun</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/cloudenochcsis">
+            <img src="https://avatars.githubusercontent.com/u/155973884?v=4" width="100" alt="cloudenochcsis"/>
+            <br />
+            <sub><b>cloudenochcsis</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/Thibault00">
+            <img src="https://avatars.githubusercontent.com/u/84420566?v=4" width="100" alt="Thibault00"/>
+            <br />
+            <sub><b>Thibault00</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/umeraamir09">
+            <img src="https://avatars.githubusercontent.com/u/130839691?v=4" width="100" alt="umeraamir09"/>
+            <br />
+            <sub><b>umeraamir09</b></sub>
+        </a>
+    </td>
+		</tr>
+		<tr>
+            <td align="center">
+        <a href="https://github.com/aksKrIITK">
+            <img src="https://avatars.githubusercontent.com/u/196282905?v=4" width="100" alt="aksKrIITK"/>
+            <br />
+            <sub><b>aksKrIITK</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/zerone0x">
+            <img src="https://avatars.githubusercontent.com/u/39543393?v=4" width="100" alt="zerone0x"/>
+            <br />
+            <sub><b>zerone0x</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/Powlisher">
+            <img src="https://avatars.githubusercontent.com/u/200061014?v=4" width="100" alt="Powlisher"/>
+            <br />
+            <sub><b>Powlisher</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/vidhishah2209">
+            <img src="https://avatars.githubusercontent.com/u/179381557?v=4" width="100" alt="vidhishah2209"/>
+            <br />
+            <sub><b>vidhishah2209</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/aayushprsingh">
+            <img src="https://avatars.githubusercontent.com/u/172073271?v=4" width="100" alt="aayushprsingh"/>
+            <br />
+            <sub><b>aayushprsingh</b></sub>
+        </a>
+    </td>
+            <td align="center">
+        <a href="https://github.com/shubh586">
+            <img src="https://avatars.githubusercontent.com/u/176175004?v=4" width="100" alt="shubh586"/>
+            <br />
+            <sub><b>shubh586</b></sub>
+        </a>
+    </td>
+		</tr>
+		<tr>
+            <td align="center">
+        <a href="https://github.com/mazenessam77">
+            <img src="https://avatars.githubusercontent.com/u/184118745?v=4" width="100" alt="mazenessam77"/>
+            <br />
+            <sub><b>mazenessam77</b></sub>
+        </a>
+    </td>
 		</tr>
 	</tbody>
 </table>
@@ -1209,24 +1331,32 @@ command-specific metadata such as which subcommand ran. For `opensre onboard`
 and `opensre investigate`, we may also collect the selected model/provider and
 whether the command used flags such as `--interactive` or `--input`.
 
-A randomly generated anonymous ID is created on first run and stored in
-`~/.config/opensre/`. We never collect alert contents, file contents,
-hostnames, credentials, or any personally identifiable information.
+A randomly generated anonymous install ID is created on first run and stored in
+`~/.config/opensre/anonymous_id`. PostHog `distinct_id` values are scoped to
+that install ID, so unique-user counts represent unique CLI installs/devices
+rather than command invocations. One-time lifecycle events use deterministic
+event IDs to avoid duplicate rows if they are retried.
+
+We never collect alert contents, file contents, hostnames, credentials, or any
+personally identifiable information.
 
 Telemetry is automatically disabled in GitHub Actions and pytest runs.
 
-To opt out locally, set the environment variable before running:
+To opt out locally, set an environment variable before running:
 
 ```bash
-export OPENSRE_NO_TELEMETRY=1
+export OPENSRE_ANALYTICS_DISABLED=1
+# or
+export DO_NOT_TRACK=1
 ```
 
-The legacy alias `OPENSRE_ANALYTICS_DISABLED=1` also still works.
-
-To inspect the payload locally without sending anything, use:
+To inspect what `opensre` is sending, every event is also appended to
+`~/.config/opensre/posthog_events.txt` by default. The file rotates at
+1000 lines (older lines move to `posthog_events.txt.1`, overwriting any
+prior backup) so it never grows unbounded. To disable local logging:
 
 ```bash
-export OPENSRE_TELEMETRY_DEBUG=1
+export OPENSRE_ANALYTICS_LOG_EVENTS=0
 ```
 
 ## License

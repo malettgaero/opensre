@@ -38,9 +38,11 @@ _ACTION_RULE = (
     "return ONLY a compact JSON object with an `actions` array. Do not give "
     "instructions when an allowed action can satisfy the request. Allowed "
     "action object schemas: "
-    '`{"action":"switch_llm_provider","provider":"anthropic","model":""}` '
+    '`{"action":"switch_llm_provider","provider":"anthropic","model":"","toolcall_model":""}` '
     "where provider is one of anthropic, openai, openrouter, gemini, nvidia, "
-    "ollama, codex and model is optional; "
+    "ollama, codex, claude-code; both `model` (reasoning) and `toolcall_model` are optional; "
+    '`{"action":"switch_toolcall_model","model":"claude-opus-4-7"}` '
+    "to change ONLY the toolcall model on the currently active provider; "
     '`{"action":"slash","command":"/model show"}` where command is one of '
     "/model show, /list models, /health, /doctor, /version. For ordinary "
     "questions, return normal Markdown."
@@ -153,6 +155,36 @@ def _parse_action_plan(text: str) -> list[dict[str, object]]:
     ]
 
 
+def _response_text(response: object) -> str:
+    """Extract text from heterogeneous LLM response content payloads."""
+    content = getattr(response, "content", None)
+    if content is None:
+        return str(response)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        text_value = content.get("text")
+        return text_value if isinstance(text_value, str) else str(content)
+    if isinstance(content, list):
+        blocks: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                blocks.append(item)
+                continue
+            if isinstance(item, dict):
+                text_value = item.get("text")
+                blocks.append(text_value if isinstance(text_value, str) else str(item))
+                continue
+            text_value = getattr(item, "text", None)
+            blocks.append(text_value if isinstance(text_value, str) else str(item))
+        joined = "\n".join(part for part in blocks if part.strip()).strip()
+        return joined or str(content)
+    text_value = getattr(content, "text", None)
+    if isinstance(text_value, str):
+        return text_value
+    return str(content)
+
+
 def _execute_action_plan(
     actions: list[dict[str, object]],
     session: ReplSession,
@@ -161,7 +193,11 @@ def _execute_action_plan(
     if not actions:
         return False
 
-    from app.cli.interactive_shell.commands import dispatch_slash, switch_llm_provider
+    from app.cli.interactive_shell.commands import (
+        dispatch_slash,
+        switch_llm_provider,
+        switch_toolcall_model,
+    )
 
     console.print()
     console.print(f"[{TERMINAL_ACCENT_BOLD}]assistant:[/]")
@@ -171,9 +207,17 @@ def _execute_action_plan(
         if kind == "switch_llm_provider":
             provider = str(action.get("provider", "")).strip()
             model = str(action.get("model", "")).strip()
+            toolcall = str(action.get("toolcall_model", "")).strip()
             label = f"switch LLM provider to {provider}"
             if model:
                 label += f" ({model})"
+            if toolcall:
+                label += f" + toolcall {toolcall}"
+        elif kind == "switch_toolcall_model":
+            requested = str(action.get("model", "")).strip()
+            label = (
+                f"switch toolcall model to {requested}" if requested else "switch toolcall model"
+            )
         elif kind == "slash":
             label = str(action.get("command", "")).strip()
         else:
@@ -188,12 +232,33 @@ def _execute_action_plan(
         if kind == "switch_llm_provider":
             provider = str(action.get("provider", "")).strip()
             requested_model = str(action.get("model", "")).strip() or None
+            requested_toolcall = str(action.get("toolcall_model", "")).strip() or None
             if not provider:
                 console.print("[red]missing provider for switch_llm_provider action[/red]")
                 continue
-            console.print(f"[bold]$ /model set {escape(provider)}[/bold]")
-            switch_llm_provider(provider, console, model=requested_model)
-            session.record("slash", f"/model set {provider}")
+            slash_label = f"/model set {provider}"
+            if requested_model:
+                slash_label += f" {requested_model}"
+            if requested_toolcall:
+                slash_label += f" --toolcall-model {requested_toolcall}"
+            console.print(f"[bold]$ {escape(slash_label)}[/bold]")
+            switch_llm_provider(
+                provider,
+                console,
+                model=requested_model,
+                toolcall_model=requested_toolcall,
+            )
+            session.record("slash", slash_label)
+            continue
+
+        if kind == "switch_toolcall_model":
+            requested_model = str(action.get("model", "")).strip()
+            if not requested_model:
+                console.print("[red]missing model for switch_toolcall_model action[/red]")
+                continue
+            console.print(f"[bold]$ /model toolcall set {escape(requested_model)}[/bold]")
+            switch_toolcall_model(requested_model, console)
+            session.record("slash", f"/model toolcall set {requested_model}")
             continue
 
         if kind == "slash":
@@ -247,8 +312,7 @@ def answer_cli_agent(
         console.print(f"[red]assistant failed:[/red] {escape(str(exc))}")
         return
 
-    text = getattr(response, "content", None) or str(response)
-    text_str = str(text)
+    text_str = _response_text(response)
     actions = _parse_action_plan(text_str)
     if _execute_action_plan(actions, session, console):
         session.cli_agent_messages.append(("user", message))
