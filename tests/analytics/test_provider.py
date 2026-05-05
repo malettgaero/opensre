@@ -86,3 +86,12 @@ def test_shutdown_analytics_without_initialization_is_safe(monkeypatch) -> None:
     monkeypatch.setattr(provider, "_instance", None)
 
     provider.shutdown_analytics(flush=False)
+
+
+def test_analytics_is_disabled_when_no_telemetry_env_var_is_set(monkeypatch) -> None:
+    """OPENSRE_NO_TELEMETRY=1 must opt out — it is set by smoke tests and documented in README."""
+    monkeypatch.setenv("OPENSRE_NO_TELEMETRY", "1")
+
+    analytics = provider.Analytics()
+
+    assert analytics._disabled is True
