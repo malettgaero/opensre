@@ -237,26 +237,6 @@ _WHATS_NEW: tuple[str, ...] = (
 _LEFT_COL_WIDTH = 46
 _RIGHT_COL_WIDTH = 40
 
-# OpenSRE brand mark — the clean figlet "big" O glyph from the splash wordmark.
-_LOGO_MARK_ROWS: tuple[str, ...] = (
-    "  ___  ",
-    " / _ \\ ",
-    "| | | |",
-    "| |_| |",
-    " \\___/ ",
-)
-
-
-def _build_logo_mark() -> Text:
-    """Return the brand mark as a styled Text block."""
-    logo = Text(no_wrap=True)
-    for index, row in enumerate(_LOGO_MARK_ROWS):
-        if index:
-            logo.append("\n")
-        logo.append(row, style=f"bold {PRIMARY_ALT}")
-    return logo
-
-
 def _format_cwd(path: str) -> str:
     """Collapse the user's home directory to ~ for a tidier identity line."""
     home = os.path.expanduser("~")
@@ -266,9 +246,7 @@ def _format_cwd(path: str) -> str:
 
 
 def _build_identity_block(provider: str, model: str, version: str, *, trust_mode: bool) -> Text:
-    """Left column: brand mark, branding, version, provider/model, mode, cwd."""
-    logo = _build_logo_mark()
-
+    """Left column: branding, version, provider/model, mode, cwd."""
     title = Text()
     title.append(f"{GLYPH_ACTIVE} ", style=f"bold {PRIMARY}")
     title.append("OpenSRE", style=f"bold {TEXT}")
@@ -289,7 +267,7 @@ def _build_identity_block(provider: str, model: str, version: str, *, trust_mode
 
     cwd = Text(_format_cwd(os.getcwd()), style=TEXT_DIM, overflow="ellipsis", no_wrap=True)
 
-    return Text("\n").join([logo, Text(), title, Text(), identity, mode, cwd])
+    return Text("\n").join([title, Text(), identity, mode, cwd])
 
 
 def _build_notes_block(header_text: str, items: tuple[str, ...]) -> Text:

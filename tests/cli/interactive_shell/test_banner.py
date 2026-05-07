@@ -9,6 +9,20 @@ from rich.console import Console
 from app.cli.interactive_shell import banner as banner_module
 
 
+def test_ready_box_omits_large_ascii_logo(monkeypatch: object) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
+    console_file = io.StringIO()
+    console = Console(file=console_file, force_terminal=False, highlight=False)
+
+    banner_module.render_ready_box(console)
+
+    output = console_file.getvalue()
+    assert "OpenSRE" in output
+    assert "  ___  " not in output
+    assert "| | | |" not in output
+
+
 def test_banner_shows_ollama_model(monkeypatch: object) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:7b")
