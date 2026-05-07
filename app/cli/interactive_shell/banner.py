@@ -237,6 +237,7 @@ _WHATS_NEW: tuple[str, ...] = (
 _LEFT_COL_WIDTH = 46
 _RIGHT_COL_WIDTH = 40
 
+
 def _format_cwd(path: str) -> str:
     """Collapse the user's home directory to ~ for a tidier identity line."""
     home = os.path.expanduser("~")

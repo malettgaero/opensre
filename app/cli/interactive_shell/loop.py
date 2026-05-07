@@ -250,9 +250,7 @@ def _slash_completion_menu_position(buffer: Buffer) -> int | None:
 def _attach_slash_completion_menu_position(prompt: PromptSession[str]) -> None:
     for control in prompt.layout.find_all_controls():
         if isinstance(control, BufferControl) and control.buffer is prompt.default_buffer:
-            control.menu_position = lambda: _slash_completion_menu_position(
-                prompt.default_buffer
-            )
+            control.menu_position = lambda: _slash_completion_menu_position(prompt.default_buffer)
 
 
 def _reopen_slash_completion_if_needed(buffer: Buffer) -> None:

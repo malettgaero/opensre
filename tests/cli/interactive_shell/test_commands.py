@@ -157,9 +157,7 @@ class TestListCommand:
         assert "openclaw" not in output
         assert "github" not in output
 
-    def test_list_integrations_does_not_run_live_verification(
-        self, monkeypatch: object
-    ) -> None:
+    def test_list_integrations_does_not_run_live_verification(self, monkeypatch: object) -> None:
         monkeypatch.setattr(
             repl_data_module,
             "load_list_integrations",
