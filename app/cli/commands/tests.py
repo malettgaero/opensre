@@ -8,7 +8,11 @@ from typing import Any
 import click
 
 from app.analytics.cli import (
+    capture_test_run_completed,
+    capture_test_run_failed,
     capture_test_run_started,
+    capture_test_synthetic_completed,
+    capture_test_synthetic_failed,
     capture_test_synthetic_started,
     capture_tests_listed,
     capture_tests_picker_opened,
@@ -26,9 +30,9 @@ class _TestIdType(click.ParamType):
 
     def shell_complete(
         self,
-        ctx: click.Context,  # noqa: ARG002
-        param: click.Parameter,  # noqa: ARG002
-        incomplete: str,  # noqa: ARG002
+        _ctx: click.Context,
+        _param: click.Parameter,
+        incomplete: str,
     ) -> list[click.shell_completion.CompletionItem]:
         try:
             from app.cli.tests.discover import load_test_catalog
@@ -39,7 +43,7 @@ class _TestIdType(click.ParamType):
                 for item in catalog.all_items()
                 if item.id.startswith(incomplete) and item.is_runnable
             ]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
 
 
@@ -64,6 +68,31 @@ def _build_synthetic_argv(*, scenario: str, output_json: bool, mock_grafana: boo
     return argv
 
 
+def _build_cloudopsbench_argv(
+    *,
+    system: str,
+    fault_category: str,
+    case: str,
+    limit: int,
+    workers: int,
+    output_json: bool,
+) -> list[str]:
+    argv: list[str] = []
+    if system:
+        argv.extend(["--system", system])
+    if fault_category:
+        argv.extend(["--fault-category", fault_category])
+    if case:
+        argv.extend(["--case", case])
+    if limit:
+        argv.extend(["--limit", str(limit)])
+    if workers != 1:
+        argv.extend(["--workers", str(workers)])
+    if output_json:
+        argv.append("--json")
+    return argv
+
+
 @click.group(name="tests", invoke_without_command=True)
 @click.pass_context
 def tests(ctx: click.Context) -> None:
@@ -80,14 +109,15 @@ def tests(ctx: click.Context) -> None:
     from app.cli.tests.discover import load_test_catalog
     from app.cli.tests.interactive import run_interactive_picker
 
+    catalog = load_test_catalog()
+    capture_tests_picker_opened()
     try:
-        exit_code = run_interactive_picker(load_test_catalog())
+        exit_code = run_interactive_picker(catalog)
     except RuntimeError as exc:
         raise OpenSREError(
             str(exc),
             suggestion="Run 'opensre tests list' or 'opensre tests run <test_id>'.",
         ) from exc
-    capture_tests_picker_opened()
     raise SystemExit(exit_code)
 
 
@@ -151,12 +181,70 @@ def run_synthetic_suite(scenario: str, output_json: bool, mock_grafana: bool) ->
         raise _synthetic_suite_not_bundled_error() from exc
 
     capture_test_synthetic_started(scenario or "all", mock_grafana=mock_grafana)
-    raise SystemExit(
-        run_suite_main(
+    scenario_name = scenario or "all"
+    try:
+        exit_code = run_suite_main(
             _build_synthetic_argv(
                 scenario=scenario,
                 output_json=output_json,
                 mock_grafana=mock_grafana,
+            )
+        )
+    except Exception as exc:
+        capture_test_synthetic_failed(scenario_name, reason=type(exc).__name__)
+        raise
+
+    capture_test_synthetic_completed(scenario_name, exit_code=exit_code)
+    raise SystemExit(exit_code)
+
+
+def _cloudopsbench_suite_not_bundled_error() -> OpenSREError:
+    return OpenSREError(
+        "The Cloud-OpsBench suite is not available in this build.",
+        suggestion=(
+            "Download the corpus with 'make download-cloudopsbench-hf' under "
+            "'tests/benchmarks/cloudopsbench/benchmark/' and re-run "
+            "'opensre tests cloudopsbench'."
+        ),
+    )
+
+
+@tests.command(name="cloudopsbench")
+@click.option("--system", default="", help="Filter to boutique or trainticket.")
+@click.option("--fault-category", default="", help="Filter to one CloudOps fault category.")
+@click.option("--case", "case_name", default="", help="Filter to one numeric case directory.")
+@click.option("--limit", default=0, type=int, help="Limit cases after sorting/filtering.")
+@click.option("--workers", default=1, type=int, show_default=True, help="Number of case workers.")
+@click.option("--json", "output_json", is_flag=True, help="Print machine-readable JSON results.")
+def run_cloudopsbench_suite(
+    system: str,
+    fault_category: str,
+    case_name: str,
+    limit: int,
+    workers: int,
+    output_json: bool,
+) -> None:
+    """Run the Cloud-OpsBench RCA benchmark through OpenSRE."""
+    try:
+        from tests.benchmarks.cloudopsbench.case_loader import BENCHMARK_DIR
+        from tests.benchmarks.cloudopsbench.run_suite import main as run_suite_main
+    except ModuleNotFoundError as exc:
+        if exc.name is None or not exc.name.startswith("tests.benchmarks.cloudopsbench"):
+            raise
+        raise _cloudopsbench_suite_not_bundled_error() from exc
+
+    if not BENCHMARK_DIR.is_dir():
+        raise _cloudopsbench_suite_not_bundled_error()
+
+    raise SystemExit(
+        run_suite_main(
+            _build_cloudopsbench_argv(
+                system=system,
+                fault_category=fault_category,
+                case=case_name,
+                limit=limit,
+                workers=workers,
+                output_json=output_json,
             )
         )
     )
@@ -218,4 +306,13 @@ def run_test(test_id: str, dry_run: bool) -> None:
         )
 
     capture_test_run_started(test_id, dry_run=dry_run)
-    raise SystemExit(run_catalog_item(item, dry_run=dry_run))
+    try:
+        exit_code = run_catalog_item(item, dry_run=dry_run)
+    except Exception as exc:
+        capture_test_run_failed(test_id, dry_run=dry_run, reason=type(exc).__name__)
+        raise
+    if exit_code == 0:
+        capture_test_run_completed(test_id, dry_run=dry_run, exit_code=exit_code)
+    else:
+        capture_test_run_failed(test_id, dry_run=dry_run, reason=f"exit_code_{exit_code}")
+    raise SystemExit(exit_code)

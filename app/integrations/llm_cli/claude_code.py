@@ -42,6 +42,10 @@ from app.integrations.llm_cli.binary_resolver import (
 from app.integrations.llm_cli.binary_resolver import (
     resolve_cli_binary,
 )
+from app.integrations.llm_cli.env_overrides import (
+    ANTHROPIC_CLI_ENV_KEYS,
+    nonempty_env_values,
+)
 from app.integrations.llm_cli.subprocess_env import build_cli_subprocess_env
 
 _CLAUDE_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+)")
@@ -59,10 +63,7 @@ def _parse_semver(text: str) -> str | None:
 def _anthropic_env_overrides() -> dict[str, str]:
     """Build Claude subprocess auth/config overrides used by probe and invoke."""
     env: dict[str, str] = {"NO_COLOR": "1"}
-    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"):
-        val = os.environ.get(key, "").strip()
-        if val:
-            env[key] = val
+    env.update(nonempty_env_values(ANTHROPIC_CLI_ENV_KEYS))
     return env
 
 

@@ -10,10 +10,13 @@ Use this package when adding a new **non-interactive** LLM that shells out to a 
 | `base.py`            | `LLMCLIAdapter` protocol, `CLIProbe`, `CLIInvocation`.                                      |
 | `registry.py`        | `CLI_PROVIDER_REGISTRY`: maps `LLM_PROVIDER` → `adapter_factory` + optional `model_env_key`. `opensre doctor` uses `get_cli_provider_registration()` so any key in this registry is treated as CLI-backed—do not hardcode provider IDs in `doctor.py`. |
 | `subprocess_env.py` | Filtered `env` passed to CLI subprocesses (`build_cli_subprocess_env`). Extend `_SAFE_SUBPROCESS_ENV_PREFIXES` here when a CLI needs vendor-specific env prefixes. |
+| `env_overrides.py` | Optional explicit HTTP/API keys merged into `CLIInvocation.env` when `build_cli_subprocess_env` would drop them (shared tuples + `nonempty_env_values`). |
 | `binary_resolver.py` | Shared executable resolution helpers (`env -> PATH -> fallback paths`).                     |
 | `runner.py`          | `CLIBackedLLMClient`: guardrails, `detect()`, `subprocess.run`, ANSI strip, `LLMResponse`.  |
 | `text.py`            | `flatten_messages_to_prompt` for stdin from chat-style payloads.                            |
 | `codex.py`           | Reference adapter: binary resolution, `codex exec`, probe via `--version` + `login status`. |
+| `opencode.py`        | Multi-provider CLI: `--version`, then `opencode auth list` (see `_parse_opencode_auth_list_output`). |
+| `kimi.py`            | `kimi --print` path: `--version`, `kimi login status`, then env/config.toml fallback (`KIMI_API_KEY`). |
 
 
 ## Wiring a new provider
@@ -84,13 +87,30 @@ Recommended probe sequence (mirrors Codex):
 
 See `_classify_codex_auth` in `codex.py` for a complete reference implementation.
 
+**OpenCode** is multi-provider: users may rely on `auth.json`, environment API keys, or both.
+Run `opencode auth list` after `--version` and parse the reported credential/environment
+counts so detection matches the CLI (do not infer auth from the JSON file alone).
+
+**Kimi** uses `kimi login status` after `--version`, then `_check_kimi_auth_fallback()` when the
+CLI did not positively confirm auth (`logged_in` not `True`): check `KIMI_API_KEY`, then API keys in
+``~/.kimi/config.toml`` (or `KIMI_SHARE_DIR`). API-key-only installs may omit “logged in” phrasing in
+`login status`, so the fallback mirrors real usage. The same fallback runs when `login status` times
+out or fails to spawn (`logged_in=None`), so a configured API key still counts as authenticated.
+
 ## Subprocess environment allowlist
 
 `CLIBackedLLMClient` passes only a safe subset of env vars to the subprocess via
 `build_cli_subprocess_env` in `subprocess_env.py` (`_SAFE_SUBPROCESS_ENV_KEYS` +
 `_SAFE_SUBPROCESS_ENV_PREFIXES`).
 
-The current prefix allowlist includes `CODEX_`, `CURSOR_`, `CLAUDE_`, and locale keys (`LC_`).
+Shared HTTP/API overrides live in `env_overrides.py`: use `nonempty_env_values(...)` with
+`OPENAI_PLATFORM_ENV_KEYS` (Codex), `HTTP_LLM_PROVIDER_ENV_KEYS` (OpenCode),
+`ANTHROPIC_CLI_ENV_KEYS` (Claude Code), or `CURSOR_CLI_ENV_KEYS` (Cursor Agent headless API key).
+Extend those tuples when you add a matching API-key env to `LLMSettings`.
+
+**Kimi** does not use those tuples today: OAuth/API material is covered by forwarding any `KIMI_*` keys via `_SAFE_SUBPROCESS_ENV_PREFIXES`; `KimiAdapter.build()` uses `CLIInvocation(env=None)` and relies on that allowlist.
+
+The current prefix allowlist includes `CODEX_`, `CURSOR_`, `CLAUDE_`, `OPENCODE_`, `KIMI_`, and locale keys (`LC_`).
 
 **If your CLI reads custom env vars** (e.g. `GEMINI_*`) you must add the
 relevant prefix to `_SAFE_SUBPROCESS_ENV_PREFIXES` in `subprocess_env.py`, otherwise the

@@ -168,6 +168,7 @@ def test_detect_not_logged_in(mock_which: MagicMock, mock_run: MagicMock) -> Non
     assert probe.logged_in is False
 
 
+@patch.dict(os.environ, {"CURSOR_API_KEY": ""}, clear=False)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which", return_value="agent")
 def test_build_adds_trust_workspace_and_model(mock_which: MagicMock) -> None:
     inv = CursorAdapter().build(prompt="hello", model="auto", workspace="/tmp/project")
@@ -182,6 +183,17 @@ def test_build_adds_trust_workspace_and_model(mock_which: MagicMock) -> None:
     assert "/tmp/project" in inv.argv
     assert "--model" in inv.argv
     assert "auto" in inv.argv
+    assert inv.env is None
+
+
+@patch.dict(os.environ, {"CURSOR_API_KEY": "ck-headless"}, clear=False)
+@patch("app.integrations.llm_cli.binary_resolver.shutil.which", return_value="agent")
+def test_build_forwards_cursor_api_key(mock_which: MagicMock) -> None:
+    """Headless auth must reach the subprocess (same pattern as Codex/OpenCode env overrides)."""
+    inv = CursorAdapter().build(prompt="hello", model=None, workspace="/tmp/project")
+
+    assert inv.env is not None
+    assert inv.env.get("CURSOR_API_KEY") == "ck-headless"
 
 
 def test_cursor_cli_registry_entry() -> None:

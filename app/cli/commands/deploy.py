@@ -8,7 +8,6 @@ from typing import Any
 import click
 
 from app.analytics.cli import (
-    capture_cli_invoked,
     capture_deploy_completed,
     capture_deploy_failed,
     capture_deploy_started,
@@ -49,7 +48,7 @@ def _get_deployment_status() -> dict[str, str]:
             "instance_id": outputs.get("InstanceId", ""),
             "port": outputs.get("ServerPort", "8080"),
         }
-    except (FileNotFoundError, Exception):  # noqa: BLE001
+    except (FileNotFoundError, Exception):
         return {}
 
 
@@ -200,7 +199,6 @@ def _run_deploy_interactive(ctx: click.Context) -> None:
         # 6. Persist to .env
         persist_langsmith_env(api_key, deployment_name)
 
-        capture_cli_invoked()
         capture_deploy_started(target="langsmith", dry_run=False)
 
         # 7. Deploy
@@ -273,7 +271,7 @@ def _check_deploy_health(status: dict[str, str], console: Any) -> None:
         )
     except TimeoutError:
         console.print(f"  [red]Timeout[/red]  could not reach {ip}:{port}")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         console.print(f"  [red]Unhealthy[/red]  {exc}")
 
 
@@ -304,7 +302,11 @@ def _build_remote_url(outputs: Mapping[str, object]) -> str | None:
     return f"http://{ip}:{port}"
 
 
-@click.group(name="deploy", invoke_without_command=True)
+@click.group(
+    name="deploy",
+    context_settings={"help_option_names": ["-h", "--help"]},
+    invoke_without_command=True,
+)
 @click.pass_context
 def deploy(ctx: click.Context) -> None:
     """Deploy OpenSRE to a cloud environment."""
@@ -389,7 +391,6 @@ def deploy_railway(
     """Deploy OpenSRE to Railway."""
     from app.deployment.methods.railway import run_deploy
 
-    capture_cli_invoked()
     capture_deploy_started(target="railway", dry_run=dry_run)
     exit_code = run_deploy(
         target="railway",

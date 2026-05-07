@@ -69,7 +69,7 @@ JWKS_CACHE_TTL_SECONDS = 3600
 DEFAULT_MAX_TOKENS = 4096
 
 # Anthropic model constants
-ANTHROPIC_REASONING_MODEL = "claude-sonnet-4-6"
+ANTHROPIC_REASONING_MODEL = "claude-opus-4-7"
 ANTHROPIC_TOOLCALL_MODEL = "claude-haiku-4-5-20251001"
 
 # OpenAI model constants
@@ -130,6 +130,9 @@ LLMProvider = Literal[
     "codex",
     "cursor",
     "claude-code",
+    "gemini-cli",
+    "opencode",
+    "kimi",
 ]
 
 
@@ -181,6 +184,9 @@ class LLMSettings(StrictConfigModel):
             "codex",
             "cursor",
             "claude-code",
+            "gemini-cli",
+            "opencode",
+            "kimi",
         )
         if provider in valid_providers:
             return provider
@@ -195,8 +201,17 @@ class LLMSettings(StrictConfigModel):
 
     @model_validator(mode="after")
     def _require_api_key_for_selected_provider(self) -> "LLMSettings":
-        if self.provider in ("ollama", "bedrock", "codex", "cursor", "claude-code"):
-            return self  # ollama: local; bedrock: IAM; codex/cursor/claude-code: CLI auth
+        if self.provider in (
+            "ollama",
+            "bedrock",
+            "codex",
+            "cursor",
+            "claude-code",
+            "gemini-cli",
+            "opencode",
+            "kimi",
+        ):
+            return self  # ollama: local; bedrock: IAM; CLI providers: vendor auth
         provider_to_key = {
             "anthropic": self.anthropic_api_key,
             "openai": self.openai_api_key,

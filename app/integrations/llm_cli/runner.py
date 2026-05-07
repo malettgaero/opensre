@@ -7,6 +7,7 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 from typing import Any
 
 from pydantic import BaseModel
@@ -115,6 +116,8 @@ class CLIBackedLLMClient:
                 input=invocation.stdin,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=invocation.cwd,
                 env=merged_env,
                 timeout=invocation.timeout_sec,
@@ -156,3 +159,11 @@ class CLIBackedLLMClient:
             extra={"provider": self._adapter.name, "cli_cost_unknown": True},
         )
         return LLMResponse(content=content)
+
+    def invoke_stream(self, prompt_or_messages: Any) -> Iterator[str]:
+        """Yield the full response as one chunk; real streaming is a follow-up.
+
+        Subprocess CLI adapters ``subprocess.run`` to completion, so this
+        satisfies the protocol contract without faking progressive output.
+        """
+        yield self.invoke(prompt_or_messages).content

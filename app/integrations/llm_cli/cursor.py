@@ -14,6 +14,7 @@ from app.integrations.llm_cli.binary_resolver import (
     default_cli_fallback_paths as _default_cli_fallback_paths,
 )
 from app.integrations.llm_cli.binary_resolver import resolve_cli_binary
+from app.integrations.llm_cli.env_overrides import CURSOR_CLI_ENV_KEYS, nonempty_env_values
 
 _CURSOR_VERSION_RE = re.compile(r"(\d{4}\.\d{2}\.\d{2}-[a-zA-Z0-9]+|\d+\.\d+\.\d+)")
 _PROBE_TIMEOUT_SEC = 3.0
@@ -55,7 +56,8 @@ class CursorAdapter:
     """Non-interactive Cursor Agent CLI adapter (`agent --print`).
 
     Optional env (see registry ``CURSOR_MODEL``): ``CURSOR_BIN`` explicit binary path,
-    ``CURSOR_MODEL`` model override. Headless auth may use ``CURSOR_API_KEY``.
+    ``CURSOR_MODEL`` model override. Headless auth uses ``CURSOR_API_KEY``, merged into
+    ``CLIInvocation.env`` via ``env_overrides.CURSOR_CLI_ENV_KEYS`` (runner-safe prefixes still apply).
     """
 
     name = "cursor"
@@ -182,11 +184,12 @@ class CursorAdapter:
         if resolved_model:
             argv.extend(["--model", resolved_model])
 
+        cursor_env = nonempty_env_values(CURSOR_CLI_ENV_KEYS)
         return CLIInvocation(
             argv=tuple(argv),
             stdin=prompt,
             cwd=ws,
-            env=None,
+            env=cursor_env or None,
             timeout_sec=self.default_exec_timeout_sec,
         )
 

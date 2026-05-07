@@ -21,6 +21,10 @@ from app.integrations.llm_cli.binary_resolver import (
 from app.integrations.llm_cli.binary_resolver import (
     resolve_cli_binary,
 )
+from app.integrations.llm_cli.env_overrides import (
+    OPENAI_PLATFORM_ENV_KEYS,
+    nonempty_env_values,
+)
 
 _CODEX_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+)")
 _PROBE_TIMEOUT_SEC = 3.0
@@ -84,27 +88,6 @@ def _codex_workspace_and_skip_git() -> tuple[str, bool]:
 
 def _fallback_codex_paths() -> list[str]:
     return _default_cli_fallback_paths("codex")
-
-
-def _openai_platform_env_overrides() -> dict[str, str]:
-    """Copy OpenAI Platform env vars into the Codex subprocess (invoke path only).
-
-    `build_cli_subprocess_env` does not forward `OPENAI_*` globally, so other CLI
-    adapters do not see them. Codex can authenticate via API key (usage billing)
-    in addition to `codex login` / ChatGPT subscription sessions.
-    """
-    keys = (
-        "OPENAI_API_KEY",
-        "OPENAI_ORG_ID",
-        "OPENAI_PROJECT_ID",
-        "OPENAI_BASE_URL",
-    )
-    out: dict[str, str] = {}
-    for key in keys:
-        val = os.environ.get(key, "").strip()
-        if val:
-            out[key] = val
-    return out
 
 
 def _has_openai_api_key() -> bool:
@@ -237,7 +220,7 @@ class CodexAdapter:
 
         argv.append("-")
 
-        oai = _openai_platform_env_overrides()
+        oai = nonempty_env_values(OPENAI_PLATFORM_ENV_KEYS)
         return CLIInvocation(
             argv=tuple(argv),
             stdin=prompt,

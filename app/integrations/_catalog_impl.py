@@ -41,6 +41,11 @@ from app.integrations.mysql import build_mysql_config
 from app.integrations.openclaw import build_openclaw_config
 from app.integrations.postgresql import build_postgresql_config
 from app.integrations.rabbitmq import build_rabbitmq_config
+from app.integrations.rds import (
+    DEFAULT_RDS_REGION,
+    build_rds_config,
+    rds_config_from_env,
+)
 from app.integrations.registry import (
     DIRECT_CLASSIFIED_EFFECTIVE_SERVICES,
     SKIP_CLASSIFIED_SERVICES,
@@ -517,6 +522,20 @@ def _classify_service_instance(
                 "verify_ssl": rabbitmq_config.verify_ssl,
                 "integration_id": record_id,
             }, "rabbitmq"
+        return None, None
+
+    if key == "rds":
+        try:
+            rds_config = build_rds_config(
+                {
+                    "db_instance_identifier": credentials.get("db_instance_identifier", ""),
+                    "region": credentials.get("region", DEFAULT_RDS_REGION),
+                }
+            )
+        except Exception:
+            return None, None
+        if rds_config.is_configured:
+            return {**rds_config.model_dump(), "integration_id": record_id}, "rds"
         return None, None
 
     if key == "airflow":
@@ -1090,6 +1109,7 @@ def load_env_integrations() -> list[dict[str, Any]]:
                 }
             )
         except Exception:
+            # invalid env-derived config: skip ArgoCD entry rather than fail discovery
             pass
         else:
             integrations.append(
@@ -1272,6 +1292,19 @@ def load_env_integrations() -> list[dict[str, Any]]:
             )
         except Exception:
             logger.debug("Failed to load RabbitMQ config from env", exc_info=True)
+
+    try:
+        rds_config = rds_config_from_env()
+    except Exception:
+        rds_config = None
+        logger.debug("Failed to load RDS config from env", exc_info=True)
+    if rds_config is not None and rds_config.is_configured:
+        integrations.append(
+            _active_env_record(
+                "rds",
+                rds_config.model_dump(exclude={"integration_id"}),
+            )
+        )
 
     bs_endpoint = os.getenv("BETTERSTACK_QUERY_ENDPOINT", "").strip()
     bs_username = os.getenv("BETTERSTACK_USERNAME", "").strip()
@@ -1576,7 +1609,7 @@ def resolve_effective_integrations(
     store_integrations: list[dict[str, Any]] | None = None,
     env_integrations: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Resolve effective local integrations from ~/.opensre and environment variables."""
+    """Resolve effective local integrations from ~/.config/opensre and environment variables."""
     store_records = (
         list(store_integrations) if store_integrations is not None else load_integrations()
     )

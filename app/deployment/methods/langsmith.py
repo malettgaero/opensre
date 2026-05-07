@@ -27,7 +27,7 @@ def _run_command(
 ) -> subprocess.CompletedProcess[str]:
     """Run a command and return the completed process."""
     try:
-        return subprocess.run(  # noqa: S603
+        return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -100,7 +100,7 @@ def _read_env_value(env_path: Path, key: str) -> str | None:
 
 
 def _load_opensre_store() -> dict[str, Any]:
-    """Load ~/.opensre/opensre.json, returning an empty dict on failure."""
+    """Load ~/.config/opensre/opensre.json, returning an empty dict on failure."""
     store_path = get_store_path()
     if not store_path.exists():
         return {}
