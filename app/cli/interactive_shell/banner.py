@@ -199,7 +199,8 @@ def render_splash(console: Console | None = None, *, first_run: bool | None = No
     for line in art.splitlines():
         t = Text()
         t.append("  ")
-        t.append(line, style=f"bold {HIGHLIGHT}")
+        for ch in line:
+            t.append(ch, style=f"bold {HIGHLIGHT}" if ch == "█" else f"bold {BRAND}")
         console.print(t)
 
     console.print()
