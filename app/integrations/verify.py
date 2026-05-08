@@ -110,7 +110,10 @@ def verify_integrations(
             )
             continue
 
-        results.append(verifier(str(integration["source"]), dict(integration["config"])))
+        try:
+            results.append(verifier(str(integration["source"]), dict(integration["config"])))
+        except Exception as err:
+            results.append(_result(current_service, str(integration["source"]), "failed", str(err)))
 
     return results
 
@@ -119,7 +122,10 @@ def format_verification_results(results: list[dict[str, str]]) -> str:
     """Render verification results as a compact terminal table."""
     lines = ["", "  SERVICE    SOURCE       STATUS      DETAIL"]
     for row in results:
-        lines.append(f"  {row['service']:<10}{row['source']:<13}{row['status']:<12}{row['detail']}")
+        lines.append(
+            f"  {row.get('service', '?'):<10}{row.get('source', '-'):<13}"
+            f"{row.get('status', '?'):<12}{row.get('detail', '')}"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -134,7 +140,7 @@ def verification_exit_code(
         return 1
     if requested_service:
         return 1 if any(row["status"] in {"missing", "failed"} for row in results) else 0
-    core_results = [row for row in results if row["service"] in CORE_VERIFY_SERVICES]
+    core_results = [row for row in results if row.get("service") in CORE_VERIFY_SERVICES]
     if not any(row["status"] == "passed" for row in core_results):
         return 1
     return 0
