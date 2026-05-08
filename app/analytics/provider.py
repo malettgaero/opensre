@@ -804,6 +804,10 @@ class Analytics:
             # the PostHog side; only report 5xx server errors to Sentry.
             if exc.response.status_code >= 500:
                 _capture_sentry_failure(exc)
+        except httpx.TransportError as exc:
+            # Network-level failures (ConnectTimeout, ConnectError, TLS handshake
+            # timeout, etc.) are transient and not actionable code bugs.
+            _log_failure("posthog_send", exc, event=item.event)
         except Exception as exc:
             _log_failure("posthog_send", exc, event=item.event)
             _capture_sentry_failure(exc)
