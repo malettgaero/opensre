@@ -35,7 +35,19 @@ def _clean_copilot_env(monkeypatch: pytest.MonkeyPatch, *, home: Path | None = N
         monkeypatch.setenv("COPILOT_HOME", str(home))
 
 
-@patch("app.integrations.llm_cli.copilot.subprocess.run")
+def _run_with_keychain_missing(args: list[str], **_kwargs: object) -> MagicMock:
+    """side_effect that returns a copilot version proc, and exit-44 for `security`.
+
+    Used by tests that exercise the config.json branch — they need the macOS
+    keychain probe to *miss* deterministically so detection falls through to
+    the file-based check on any host.
+    """
+    if args and args[0] == "security":
+        return MagicMock(returncode=44, stdout="", stderr="not found")
+    return _version_proc()
+
+
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_with_config_json_is_logged_in(
     mock_which: MagicMock,
@@ -44,8 +56,8 @@ def test_detect_with_config_json_is_logged_in(
     tmp_path: Path,
 ) -> None:
     """A populated $COPILOT_HOME/config.json is a positive auth signal."""
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     home = tmp_path / "copilot_home"
     home.mkdir()
@@ -62,7 +74,7 @@ def test_detect_with_config_json_is_logged_in(
     assert "config.json" in probe.detail
 
 
-@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_with_empty_config_json_is_not_logged_in(
     mock_which: MagicMock,
@@ -71,8 +83,8 @@ def test_detect_with_empty_config_json_is_not_logged_in(
     tmp_path: Path,
 ) -> None:
     """Greptile review: an empty / leftover config.json must NOT be a false positive."""
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     home = tmp_path / "copilot_home"
     home.mkdir()
@@ -86,7 +98,7 @@ def test_detect_with_empty_config_json_is_not_logged_in(
     assert "Could not verify" in probe.detail
 
 
-@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_with_unrelated_files_is_not_logged_in(
     mock_which: MagicMock,
@@ -99,8 +111,8 @@ def test_detect_with_unrelated_files_is_not_logged_in(
     Previous heuristic returned True if ANY file existed in the dir; this is a
     regression test for the false-positive case the reviewer flagged.
     """
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     home = tmp_path / "copilot_home"
     home.mkdir()
@@ -114,7 +126,7 @@ def test_detect_with_unrelated_files_is_not_logged_in(
     assert "Could not verify" in probe.detail
 
 
-@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_with_invalid_json_config_is_not_logged_in(
     mock_which: MagicMock,
@@ -123,8 +135,8 @@ def test_detect_with_invalid_json_config_is_not_logged_in(
     tmp_path: Path,
 ) -> None:
     """A corrupt config.json must not be treated as authenticated."""
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     home = tmp_path / "copilot_home"
     home.mkdir()
@@ -136,7 +148,105 @@ def test_detect_with_invalid_json_config_is_not_logged_in(
     assert probe.logged_in is None
 
 
+@patch("app.integrations.llm_cli.copilot.sys")
 @patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.binary_resolver.shutil.which")
+def test_detect_macos_keychain_entry_is_logged_in(
+    mock_which: MagicMock,
+    mock_run: MagicMock,
+    mock_sys: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """macOS Keychain entry for service `copilot-cli` is a positive auth signal.
+
+    The probe is `security find-generic-password -s copilot-cli` (no `-w`),
+    which returns 0 when the entry exists without triggering TouchID.
+    """
+    mock_sys.platform = "darwin"
+    mock_which.return_value = "/usr/bin/copilot"
+
+    keychain_proc = MagicMock(returncode=0, stdout="keychain entry...", stderr="")
+
+    def side_effect(args: list[str], **_kwargs: object) -> MagicMock:
+        if len(args) >= 2 and args[1] == "--version":
+            return _version_proc()
+        if args[0] == "security" and "find-generic-password" in args:
+            return keychain_proc
+        raise AssertionError(f"unexpected: {args}")
+
+    mock_run.side_effect = side_effect
+
+    empty_home = tmp_path / "empty_copilot_home"
+    _clean_copilot_env(monkeypatch, home=empty_home)
+
+    probe = CopilotAdapter().detect()
+    assert probe.installed is True
+    assert probe.logged_in is True
+    assert "macOS Keychain" in probe.detail
+
+
+@patch("app.integrations.llm_cli.copilot.sys")
+@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.binary_resolver.shutil.which")
+def test_detect_macos_keychain_missing_falls_through(
+    mock_which: MagicMock,
+    mock_run: MagicMock,
+    mock_sys: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the keychain entry is absent (exit 44), classify as unclear (None)."""
+    mock_sys.platform = "darwin"
+    mock_which.return_value = "/usr/bin/copilot"
+
+    missing_proc = MagicMock(returncode=44, stdout="", stderr="not found")
+
+    def side_effect(args: list[str], **_kwargs: object) -> MagicMock:
+        if len(args) >= 2 and args[1] == "--version":
+            return _version_proc()
+        if args[0] == "security":
+            return missing_proc
+        raise AssertionError(f"unexpected: {args}")
+
+    mock_run.side_effect = side_effect
+
+    empty_home = tmp_path / "empty_copilot_home"
+    _clean_copilot_env(monkeypatch, home=empty_home)
+
+    probe = CopilotAdapter().detect()
+    assert probe.installed is True
+    assert probe.logged_in is None
+
+
+@patch("app.integrations.llm_cli.copilot.sys")
+@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.binary_resolver.shutil.which")
+def test_detect_skips_keychain_probe_on_non_darwin(
+    mock_which: MagicMock,
+    mock_run: MagicMock,
+    mock_sys: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """On Linux / Windows we do not run `security`; only --version is probed."""
+    mock_sys.platform = "linux"
+    mock_which.return_value = "/usr/bin/copilot"
+    mock_run.return_value = _version_proc()
+
+    empty_home = tmp_path / "empty_copilot_home"
+    _clean_copilot_env(monkeypatch, home=empty_home)
+
+    probe = CopilotAdapter().detect()
+    assert probe.installed is True
+    assert probe.logged_in is None
+    # `security` must not have been spawned on Linux.
+    for call in mock_run.call_args_list:
+        argv = call.args[0]
+        assert argv[0] != "security"
+
+
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_with_token_env_is_logged_in_fallback(
     mock_which: MagicMock,
@@ -145,8 +255,8 @@ def test_detect_with_token_env_is_logged_in_fallback(
     tmp_path: Path,
 ) -> None:
     """When no stored credentials exist, a token env counts as authenticated."""
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     empty_home = tmp_path / "empty_copilot_home"
     _clean_copilot_env(monkeypatch, home=empty_home)
@@ -158,7 +268,7 @@ def test_detect_with_token_env_is_logged_in_fallback(
     assert "COPILOT_GITHUB_TOKEN" in probe.detail
 
 
-@patch("app.integrations.llm_cli.copilot.subprocess.run")
+@patch("app.integrations.llm_cli.copilot.subprocess.run", side_effect=_run_with_keychain_missing)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which")
 def test_detect_no_creds_no_token_is_unclear(
     mock_which: MagicMock,
@@ -167,8 +277,8 @@ def test_detect_no_creds_no_token_is_unclear(
     tmp_path: Path,
 ) -> None:
     """Without stored credentials or token env, auth state is unclear (None)."""
+    del mock_run
     mock_which.return_value = "/usr/bin/copilot"
-    mock_run.return_value = _version_proc()
 
     empty_home = tmp_path / "empty_copilot_home"
     _clean_copilot_env(monkeypatch, home=empty_home)

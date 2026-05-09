@@ -25,15 +25,19 @@ We therefore classify auth in this order:
 
 1. ``COPILOT_GITHUB_TOKEN`` / ``GH_TOKEN`` / ``GITHUB_TOKEN`` env var set
    → ``True`` (the CLI accepts these as a documented fallback).
-2. ``$COPILOT_HOME/config.json`` exists and parses as a non-empty JSON
+2. macOS Keychain entry under service ``copilot-cli`` (silent metadata
+   probe via ``security find-generic-password``; no TouchID prompt) →
+   ``True``. This is the Copilot CLI's preferred credential store on
+   macOS, so users who ran ``/login`` interactively are detected here
+   without setting any env var.
+3. ``$COPILOT_HOME/config.json`` exists and parses as a non-empty JSON
    object → ``True``. We validate the *content*, not just the file's
-   existence, so leftover/empty/junk files do not cause a false positive
-   (Greptile review).
-3. Otherwise → ``None`` (auth state cannot be verified from the host).
-   This is the steady state for keychain-stored credentials: the
-   credential is in the OS keychain and Python cannot read it without
-   triggering a TouchID/password prompt. The runner will surface the
-   auth hint if invocation fails; the wizard offers retry / repick.
+   existence, so leftover / empty / junk files do not cause a false
+   positive.
+4. Otherwise → ``None`` (auth state cannot be verified). On Linux
+   libsecret / Windows Credential Manager we do not yet have a silent
+   probe wired up. The runner surfaces the auth hint if invocation
+   fails; the wizard offers retry / repick.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 from app.integrations.llm_cli.base import CLIInvocation, CLIProbe
@@ -61,6 +66,10 @@ from app.integrations.llm_cli.env_overrides import (
 
 _COPILOT_VERSION_RE = re.compile(r"(\d+\.\d+\.\d+)")
 _PROBE_TIMEOUT_SEC = 5.0
+_KEYCHAIN_PROBE_TIMEOUT_SEC = 2.0
+# `copilot-cli` is what the GitHub docs name, but the CLI has historically used
+# a few other service names; check all of them so a working login is detected.
+_KEYCHAIN_SERVICES: tuple[str, ...] = ("copilot-cli", "github-copilot-cli", "gh-copilot")
 _AUTH_HINT = "Run `copilot` then /login, or set COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN."
 
 
@@ -105,24 +114,61 @@ def _has_token_env() -> str | None:
     return None
 
 
+def _macos_keychain_has_copilot_entry() -> str | None:
+    """Return the matching service name iff macOS Keychain has a Copilot entry.
+
+    ``security find-generic-password -s <service>`` (no ``-w``/``-g``) queries
+    entry *metadata* only and does not require Keychain unlock or TouchID. The
+    process returns 0 when an entry exists, 44 when it is missing. We try the
+    documented service name and a couple of historical variants so a working
+    ``/login`` is detected regardless of which CLI version wrote the entry.
+    Returns the service name on the first hit, or ``None`` when no match.
+    """
+    if sys.platform != "darwin":
+        return None
+    for service in _KEYCHAIN_SERVICES:
+        try:
+            proc = subprocess.run(
+                ["security", "find-generic-password", "-s", service],
+                capture_output=True,
+                text=True,
+                timeout=_KEYCHAIN_PROBE_TIMEOUT_SEC,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode == 0:
+            return service
+    return None
+
+
 def _classify_copilot_auth() -> tuple[bool | None, str]:
-    """Resolve auth state without spawning the CLI.
+    """Resolve auth state without spawning the Copilot CLI itself.
 
     Documented fallbacks (in order):
-      1. Token env var (the CLI's own documented fallback).
-      2. ``$COPILOT_HOME/config.json`` plaintext credential file.
-      3. Unknown — keychain-stored credentials are not introspectable
-         from Python without triggering an OS auth prompt.
+      1. Token env var (the CLI's own documented auth fallback).
+      2. macOS Keychain entry (``security find-generic-password -s copilot-cli``)
+         — silent metadata probe, no TouchID prompt. The Copilot CLI's preferred
+         credential store on macOS.
+      3. ``$COPILOT_HOME/config.json`` plaintext credential file (used when no
+         system keychain is available, e.g. some CI / Linux environments).
+      4. Unknown — Linux libsecret and Windows Credential Manager are not yet
+         introspected here (no equivalent silent probe is wired up); the runner
+         will surface the auth hint if invocation fails, and the wizard offers
+         retry / repick.
     """
     token_key = _has_token_env()
     if token_key:
         return True, f"Authenticated via {token_key}."
+    keychain_service = _macos_keychain_has_copilot_entry()
+    if keychain_service:
+        return True, f"Authenticated via macOS Keychain (service '{keychain_service}')."
     if _config_json_has_credentials():
         return True, f"Authenticated via {_copilot_home() / 'config.json'}."
     return (
         None,
-        "Could not verify Copilot CLI auth from the host (keychain credentials "
-        f"are not introspectable). {_AUTH_HINT}",
+        "Could not verify Copilot CLI auth from the host (system keychain "
+        f"credentials are not introspectable on this platform). {_AUTH_HINT}",
     )
 
 
