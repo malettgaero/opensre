@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from app.cli.commands.remote_health import _save_remote_base_url, run_remote_health_check
+from app.cli.interactive_shell.theme import BRAND, DIM, ERROR, HIGHLIGHT, WARNING
 from app.cli.support.context import is_json_output, is_yes
 from app.cli.support.errors import OpenSREError
 
@@ -25,11 +26,11 @@ def _context_value(ctx: click.Context, key: str) -> str | None:
 def _remote_style(questionary: Any) -> Any:
     return questionary.Style(
         [
-            ("qmark", "fg:cyan bold"),
+            ("qmark", f"fg:{BRAND} bold"),
             ("question", "bold"),
-            ("answer", "fg:cyan bold"),
-            ("pointer", "fg:cyan bold"),
-            ("highlighted", "fg:cyan bold"),
+            ("answer", f"fg:{BRAND} bold"),
+            ("pointer", f"fg:{BRAND} bold"),
+            ("highlighted", f"fg:{BRAND} bold"),
         ]
     )
 
@@ -87,19 +88,19 @@ def _browse_investigations(ctx: click.Context, style: Any, questionary: Any, con
             f"Connection timed out: {exc}",
             suggestion="Check network connectivity and verify the remote agent is running.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Failed to list investigations: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
         ) from exc
 
     if not investigations:
-        console.print("  [dim]No investigations found on the remote server.[/dim]")
+        console.print(f"  [{DIM}]No investigations found on the remote server.[/]")
         return
 
     while True:
         console.print()
-        console.print(f"  [bold cyan]Investigations[/bold cyan]  {len(investigations)} available")
+        console.print(f"  [bold {BRAND}]Investigations[/]  {len(investigations)} available")
         console.print()
 
         choices = [
@@ -126,8 +127,8 @@ def _browse_investigations(ctx: click.Context, style: Any, questionary: Any, con
 
         try:
             content = client.get_investigation(selected)
-        except Exception as exc:  # noqa: BLE001
-            console.print(f"  [red]Failed to load: {exc}[/red]")
+        except Exception as exc:
+            console.print(f"  [{ERROR}]Failed to load: {exc}[/]")
             continue
 
         console.print()
@@ -150,7 +151,7 @@ def _browse_investigations(ctx: click.Context, style: Any, questionary: Any, con
             out_dir.mkdir(parents=True, exist_ok=True)
             dest = out_dir / f"{selected}.md"
             dest.write_text(content, encoding="utf-8")
-            console.print(f"  [green]Saved:[/green] {dest}")
+            console.print(f"  [{HIGHLIGHT}]Saved:[/] {dest}")
 
         if after is None or after == "exit":
             return
@@ -175,14 +176,14 @@ def _render_preflight_status(
 ) -> None:
     """Print a rich one-liner showing connection health."""
     if preflight is None:
-        console.print("  [bold cyan]Remote Agent[/bold cyan]  [dim]no remote URL configured[/dim]")
+        console.print(f"  [bold {BRAND}]Remote Agent[/]  [{DIM}]no remote URL configured[/]")
         return
 
-    base = f"[bold]{url}[/bold] [dim]({label})[/dim]"
+    base = f"[bold]{url}[/bold] [{DIM}]({label})[/]"
 
     if not preflight.ok:
-        console.print(f"  [bold cyan]Remote Agent[/bold cyan]  [red]●[/red] {base}")
-        console.print(f"  [red]{preflight.error}[/red]")
+        console.print(f"  [bold {BRAND}]Remote Agent[/]  [{ERROR}]●[/] {base}")
+        console.print(f"  [{ERROR}]{preflight.error}[/]")
         return
 
     parts = [f"v{preflight.version}"] if preflight.version else []
@@ -195,8 +196,8 @@ def _render_preflight_status(
         parts.append("langgraph")
     detail = "  ".join(parts)
 
-    dot = "[green]●[/green]" if preflight.status_label == "healthy" else "[yellow]●[/yellow]"
-    console.print(f"  [bold cyan]Remote Agent[/bold cyan]  {dot} {base}  {detail}")
+    dot = f"[{HIGHLIGHT}]●[/]" if preflight.status_label == "healthy" else f"[{WARNING}]●[/]"
+    console.print(f"  [bold {BRAND}]Remote Agent[/]  {dot} {base}  {detail}")
 
     sys_metrics = preflight.system
     if sys_metrics:
@@ -214,12 +215,12 @@ def _render_preflight_status(
         if uptime:
             metric_parts.append(f"up: {uptime['human']}")
         if metric_parts:
-            console.print(f"  [dim]{' | '.join(metric_parts)}[/dim]")
+            console.print(f"  [{DIM}]{' | '.join(metric_parts)}[/]")
 
     if preflight.supports_investigate and not preflight.supports_live_stream:
-        console.print("  [yellow]Live investigation streaming unavailable on this remote.[/yellow]")
+        console.print(f"  [{WARNING}]Live investigation streaming unavailable on this remote.[/]")
         console.print(
-            "  [dim]Redeploy the latest remote server to stream LangGraph step events.[/dim]"
+            f"  [{DIM}]Redeploy the latest remote server to stream LangGraph step events.[/]"
         )
 
 
@@ -235,11 +236,11 @@ def _render_health_with_preflight(preflight: PreflightResult, base_url: str, con
 
     st = preflight.server_type
     if st == "lightweight":
-        st_display = "[green]lightweight[/green]"
+        st_display = f"[{HIGHLIGHT}]lightweight[/]"
     elif st == "langgraph":
-        st_display = "[cyan]langgraph[/cyan]"
+        st_display = f"[{BRAND}]langgraph[/]"
     else:
-        st_display = f"[yellow]{st}[/yellow]"
+        st_display = f"[{WARNING}]{st}[/]"
     header.add_row("[bold]Server type[/bold]", st_display)
 
     if preflight.endpoints:
@@ -247,20 +248,18 @@ def _render_health_with_preflight(preflight: PreflightResult, base_url: str, con
 
     header.add_row("[bold]Latency[/bold]", f"{preflight.latency_ms}ms")
     if preflight.supports_live_stream:
-        header.add_row("[bold]Live events[/bold]", "[green]available[/green]")
+        header.add_row("[bold]Live events[/bold]", f"[{HIGHLIGHT}]available[/]")
     elif preflight.supports_investigate:
-        header.add_row("[bold]Live events[/bold]", "[yellow]unavailable[/yellow]")
+        header.add_row("[bold]Live events[/bold]", f"[{WARNING}]unavailable[/]")
         header.add_row(
             "[bold]Action[/bold]",
             "Redeploy the latest remote server to stream LangGraph steps.",
         )
 
     if not preflight.ok:
-        header.add_row("[bold]Status[/bold]", f"[red]{preflight.error}[/red]")
+        header.add_row("[bold]Status[/bold]", f"[{ERROR}]{preflight.error}[/]")
 
-    console.print(
-        Panel(header, title="[bold cyan]Remote Agent Health[/bold cyan]", border_style="cyan")
-    )
+    console.print(Panel(header, title=f"[bold {BRAND}]Remote Agent Health[/]", border_style=BRAND))
 
 
 def _build_investigation_choices(
@@ -470,7 +469,7 @@ def _run_remote_interactive(ctx: click.Context) -> None:
                 default=False,
                 style=style,
             ).ask():
-                console.print("  [dim]Cancelled.[/dim]")
+                console.print(f"  [{DIM}]Cancelled.[/]")
                 console.print()
                 continue
 
@@ -600,7 +599,7 @@ def _pick_remote(
             default_url = url
 
     console.print()
-    console.print("  [bold cyan]Remote Agent[/bold cyan]  multiple remotes configured")
+    console.print(f"  [bold {BRAND}]Remote Agent[/]  multiple remotes configured")
     console.print()
 
     selected: str | None = questionary.select(
@@ -643,7 +642,7 @@ def _run_streamed_investigation(ctx: click.Context, raw_alert: dict[str, Any]) -
             f"Connection timed out reaching {client.base_url}.",
             suggestion="Check network connectivity and verify the remote agent is running.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Remote investigation failed: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
@@ -663,9 +662,9 @@ def _handle_stream_404(
 
     if preflight.supports_langgraph:
         console.print(
-            "  [yellow]Streaming endpoint not available — LangGraph deployment detected.[/yellow]"
+            f"  [{WARNING}]Streaming endpoint not available — LangGraph deployment detected.[/]"
         )
-        console.print("  [dim]Auto-switching to LangGraph trigger path...[/dim]")
+        console.print(f"  [{DIM}]Auto-switching to LangGraph trigger path...[/]")
         console.print()
         _run_langgraph_investigation(ctx, raw_alert)
         return
@@ -714,8 +713,8 @@ def _run_langgraph_investigation(ctx: click.Context, raw_alert: dict[str, Any]) 
             from rich.console import Console
 
             console = Console(highlight=False)
-            console.print("  [yellow]LangGraph endpoint not available on this server.[/yellow]")
-            console.print("  [dim]Falling back to lightweight server path...[/dim]")
+            console.print(f"  [{WARNING}]LangGraph endpoint not available on this server.[/]")
+            console.print(f"  [{DIM}]Falling back to lightweight server path...[/]")
             console.print()
             _run_streamed_investigation(ctx, raw_alert)
             return
@@ -728,7 +727,7 @@ def _run_langgraph_investigation(ctx: click.Context, raw_alert: dict[str, Any]) 
             f"Connection timed out reaching {client.base_url}.",
             suggestion="Check network connectivity and verify the remote agent is running.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Remote investigation failed: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
@@ -926,7 +925,7 @@ def remote_trigger(ctx: click.Context, alert_json: str | None, detach: bool) -> 
             f"Connection timed out reaching {client.base_url}.",
             suggestion="Check network connectivity and verify the remote agent is running.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Remote investigation failed: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
@@ -990,7 +989,7 @@ def _run_blocking_investigation(ctx: click.Context, raw_alert: dict[str, Any]) -
             f"Connection timed out: {exc}",
             suggestion="The remote agent may be overloaded. Try again or check 'opensre remote health'.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Remote investigation failed: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
@@ -1028,7 +1027,7 @@ def remote_pull(ctx: click.Context, latest: bool, pull_all: bool, output_dir: st
             f"Connection timed out: {exc}",
             suggestion="Check network connectivity and verify the remote agent is running.",
         ) from exc
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise OpenSREError(
             f"Failed to list investigations: {exc}",
             suggestion="Run 'opensre remote health' to verify the remote agent.",
@@ -1055,5 +1054,5 @@ def remote_pull(ctx: click.Context, latest: bool, pull_all: bool, output_dir: st
             destination = output_path / f"{investigation_id}.md"
             destination.write_text(content, encoding="utf-8")
             click.echo(f"  Downloaded: {destination}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             click.echo(f"  Failed to download {investigation_id}: {exc}", err=True)

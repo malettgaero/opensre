@@ -65,10 +65,12 @@ class TestLLMLoader:
         with llm_loader(console, label="consulting the model"):
             pass
 
-        assert "#6b6561" in captured["text"]
+        from app.cli.interactive_shell.theme import SECONDARY
+
+        assert SECONDARY in captured["text"]
         assert "consulting the model" in captured["text"]
         assert captured["kwargs"]["spinner"] == "dots"
-        assert captured["kwargs"]["spinner_style"] == "#6b6561"
+        assert captured["kwargs"]["spinner_style"] == SECONDARY
 
 
 def test_module_exports_loader_and_default_label() -> None:

@@ -1,4 +1,21 @@
-"""Full environment diagnostic command, inspired by ``fly doctor``."""
+"""Full environment diagnostic command, inspired by ``fly doctor``.
+
+Rendered output (colour roles):
+──────────────────────────────────────────── [DIM rule]
+  OpenSRE Doctor                             [TEXT bold section header]
+──────────────────────────────────────────── [DIM rule]
+
+  ✓  python          Python 3.13.2           [HIGHLIGHT ✓] [SECONDARY check] [TEXT detail]
+  ✓  env_file        .env (12 keys)
+  ⚠  integrations    no integrations         [WARNING ⚠]
+  ✗  llm_provider    ANTHROPIC_API_KEY unset [ERROR ✗]
+  ✓  version         <version> (up to date)
+  ✓  network         github.com reachable
+
+──────────────────────────────────────────── [DIM rule]
+  1 error · 1 warning — run opensre doctor   [ERROR/WARNING counts · SECONDARY hint]
+  All checks passed.                         [HIGHLIGHT — when clean]
+"""
 
 from __future__ import annotations
 
@@ -10,9 +27,24 @@ from pathlib import Path
 from typing import Any
 
 import click
+from rich.console import Console
+from rich.rule import Rule
+from rich.text import Text
 
+from app.cli.interactive_shell.theme import (
+    DIM,
+    ERROR,
+    GLYPH_ERROR,
+    GLYPH_SUCCESS,
+    GLYPH_WARNING,
+    HIGHLIGHT,
+    SECONDARY,
+    TEXT,
+    WARNING,
+)
 from app.cli.support.context import is_json_output
-from app.cli.support.exit_codes import ERROR, SUCCESS
+from app.cli.support.exit_codes import ERROR as EXIT_ERROR
+from app.cli.support.exit_codes import SUCCESS
 from app.version import get_version
 
 
@@ -21,7 +53,7 @@ def _check(name: str, fn: Any) -> dict[str, str]:
     try:
         ok, detail = fn()
         return {"check": name, "status": "ok" if ok else "warn", "detail": detail}
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return {"check": name, "status": "error", "detail": str(exc)}
 
 
@@ -72,8 +104,11 @@ def _check_llm_provider() -> tuple[bool, str]:
         return True, f"provider={provider}, CLI ready ({probe.detail})"
 
     expected_key = key_vars.get(provider)
-    if expected_key and not os.getenv(expected_key):
-        return False, f"provider={provider}, but {expected_key} is not set"
+    if expected_key:
+        from app.llm_credentials import has_llm_api_key
+
+        if not has_llm_api_key(expected_key):
+            return False, f"provider={provider}, but {expected_key} is not set"
     return True, f"provider={provider}"
 
 
@@ -107,7 +142,7 @@ def _check_version_freshness() -> tuple[bool, str]:
         if _is_update_available(current, latest):
             return False, f"current={current}, latest={latest} — run 'opensre update'"
         return True, f"{current} (up to date)"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return True, f"{current} (could not check: {exc})"
 
 
@@ -119,11 +154,80 @@ _CHECKS = [
     ("version", _check_version_freshness),
 ]
 
-_STATUS_SYMBOLS = {
-    "ok": "\033[1;32m✓\033[0m",
-    "warn": "\033[1;33m!\033[0m",
-    "error": "\033[1;31m✗\033[0m",
-}
+
+def _render_doctor_results(console: Console, results: list[dict[str, str]]) -> None:
+    """Print formatted diagnostic results with design-system colour roles.
+
+    Section header: TEXT bold + DIM rule (col 45).
+    ✓ checks:  HIGHLIGHT glyph, SECONDARY check name, TEXT detail.
+    ⚠ warnings: WARNING glyph, SECONDARY check name, TEXT detail.
+    ✗ errors:  ERROR glyph, SECONDARY check name, TEXT detail.
+    Summary:   ERROR count + WARNING count in their respective roles, SECONDARY hint.
+    """
+    console.print()
+    console.print(Rule(style=DIM))
+
+    # Section header — TEXT weight, DIM rule to col 45.
+    header = Text()
+    header.append("  OpenSRE Doctor", style=f"bold {TEXT}")
+    console.print(header)
+
+    console.print(Rule(style=DIM))
+    console.print()
+
+    check_col = 18  # fixed column width for check name alignment
+
+    for r in results:
+        status = r["status"]
+
+        if status == "ok":
+            glyph = GLYPH_SUCCESS
+            glyph_style = f"bold {HIGHLIGHT}"
+            detail_style = TEXT
+        elif status == "warn":
+            glyph = GLYPH_WARNING
+            glyph_style = f"bold {WARNING}"
+            detail_style = TEXT
+        else:
+            glyph = GLYPH_ERROR
+            glyph_style = f"bold {ERROR}"
+            detail_style = TEXT
+
+        row = Text()
+        row.append(f"  {glyph}  ", style=glyph_style)
+        row.append(f"{r['check']:<{check_col}}", style=SECONDARY)
+        row.append(r["detail"], style=detail_style)
+        console.print(row)
+
+    console.print()
+    console.print(Rule(style=DIM))
+
+    error_count = sum(1 for r in results if r["status"] == "error")
+    warn_count = sum(1 for r in results if r["status"] == "warn")
+
+    if error_count == 0 and warn_count == 0:
+        summary = Text()
+        summary.append(f"  {GLYPH_SUCCESS}  ", style=f"bold {HIGHLIGHT}")
+        summary.append("All checks passed.", style=TEXT)
+        console.print(summary)
+    else:
+        summary = Text()
+        summary.append("  ")
+        if error_count:
+            summary.append(
+                f"{error_count} error{'s' if error_count > 1 else ''}", style=f"bold {ERROR}"
+            )
+        if error_count and warn_count:
+            summary.append("  ·  ", style=SECONDARY)
+        if warn_count:
+            summary.append(
+                f"{warn_count} warning{'s' if warn_count > 1 else ''}", style=f"bold {WARNING}"
+            )
+        summary.append("   —   fix and rerun ", style=SECONDARY)
+        summary.append("opensre doctor", style=f"bold {TEXT}")
+        console.print(summary)
+
+    console.print()
 
 
 @click.command(name="doctor")
@@ -136,20 +240,8 @@ def doctor_command() -> None:
     if is_json_output():
         click.echo(json.dumps(results, indent=2))
     else:
-        click.echo()
-        click.echo("  \033[1mOpenSRE Doctor\033[0m")
-        click.echo()
-        for r in results:
-            sym = _STATUS_SYMBOLS.get(r["status"], "?")
-            click.echo(f"  {sym}  {r['check']:<18} {r['detail']}")
-        click.echo()
-
-        errors = [r for r in results if r["status"] in ("warn", "error")]
-        if errors:
-            click.echo(f"  {len(errors)} issue(s) found. Fix them and rerun 'opensre doctor'.")
-        else:
-            click.echo("  All checks passed.")
-        click.echo()
+        console = Console(highlight=False, force_terminal=True, color_system="truecolor")
+        _render_doctor_results(console, results)
 
     has_errors = any(r["status"] == "error" for r in results)
-    raise SystemExit(ERROR if has_errors else SUCCESS)
+    raise SystemExit(EXIT_ERROR if has_errors else SUCCESS)

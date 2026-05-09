@@ -18,7 +18,9 @@ from app.integrations.config_models import (
     CoralogixIntegrationConfig,
     GoogleDocsIntegrationConfig,
     GrafanaIntegrationConfig,
+    HelmIntegrationConfig,
     HoneycombIntegrationConfig,
+    IncidentIoIntegrationConfig,
     SlackWebhookConfig,
     TracerIntegrationConfig,
 )
@@ -36,7 +38,9 @@ from app.services.argocd import ArgoCDClient, ArgoCDConfig
 from app.services.coralogix import CoralogixClient
 from app.services.datadog.client import DatadogClient, DatadogConfig
 from app.services.google_docs import GoogleDocsClient
+from app.services.helm import HelmClient
 from app.services.honeycomb import HoneycombClient
+from app.services.incident_io import IncidentIoClient
 from app.services.opsgenie import OpsGenieClient, OpsGenieConfig
 from app.services.splunk import SplunkClient, SplunkConfig
 from app.services.tracer_client.client import TracerClient
@@ -109,7 +113,10 @@ def build_probe_verifier[ConfigT](
             normalized_config = build_config(config)
         except Exception as err:
             return result(service, source, "missing", str(err))
-        probe_result = client_factory(normalized_config).probe_access()
+        try:
+            probe_result = client_factory(normalized_config).probe_access()
+        except Exception as err:
+            return result(service, source, "failed", str(err))
         return result(service, source, probe_result.status, probe_result.detail)
 
     return _verifier
@@ -172,7 +179,7 @@ def _verify_grafana(source: str, config: dict[str, Any]) -> dict[str, str]:
         )
         response.raise_for_status()
         payload = response.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return result("grafana", source, "failed", f"Datasource discovery failed: {exc}")
 
     datasources = payload if isinstance(payload, list) else []
@@ -204,7 +211,7 @@ def _verify_aws(source: str, config: dict[str, Any]) -> dict[str, str]:
     try:
         sts_client, region, mode = _build_sts_client(config)
         identity = sts_client.get_caller_identity()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return result("aws", source, "failed", f"AWS STS check failed: {exc}")
 
     account = str(identity.get("Account", "")).strip()
@@ -246,7 +253,7 @@ def _verify_slack(
     try:
         response = httpx.post(webhook_url, json=payload, timeout=10.0)
         response.raise_for_status()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return result("slack", source, "failed", f"Webhook delivery failed: {exc}")
     return result("slack", source, "passed", "Webhook delivered test message successfully.")
 
@@ -299,7 +306,7 @@ def _verify_discord(source: str, config: dict[str, Any]) -> dict[str, str]:
         client.run(bot_token)
     except discord.LoginFailure as err:
         return result("discord", source, "failed", f"Discord login failed: {err}")
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         detail = str(err)
         if "run() cannot be called from a running event loop" in detail:
             return result("discord", source, "passed", "Discord bot token accepted.")
@@ -316,7 +323,7 @@ def _verify_telegram(source: str, config: dict[str, Any]) -> dict[str, str]:
         response = requests.get(f"https://api.telegram.org/bot{bot_token}/getMe", timeout=10)
         response.raise_for_status()
         payload = response.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return result("telegram", source, "failed", f"Telegram API check failed: {exc}")
 
     if not payload.get("ok"):
@@ -532,6 +539,11 @@ _verify_opsgenie = build_probe_verifier(
     build_config=OpsGenieConfig.model_validate,
     client_factory=OpsGenieClient,
 )
+_verify_incident_io = build_probe_verifier(
+    "incident_io",
+    build_config=IncidentIoIntegrationConfig.model_validate,
+    client_factory=IncidentIoClient,
+)
 _verify_alertmanager = build_probe_verifier(
     "alertmanager",
     build_config=AlertmanagerConfig.model_validate,
@@ -541,6 +553,11 @@ _verify_argocd = build_probe_verifier(
     "argocd",
     build_config=ArgoCDConfig.model_validate,
     client_factory=ArgoCDClient,
+)
+_verify_helm = build_probe_verifier(
+    "helm",
+    build_config=HelmIntegrationConfig.model_validate,
+    client_factory=HelmClient,
 )
 _verify_splunk = build_probe_verifier(
     "splunk",
@@ -575,6 +592,8 @@ __all__ = [
     "_verify_google_docs",
     "_verify_grafana",
     "_verify_honeycomb",
+    "_verify_helm",
+    "_verify_incident_io",
     "_verify_kafka",
     "_verify_mariadb",
     "_verify_mongodb",
