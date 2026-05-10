@@ -22,10 +22,10 @@ from app.cli.interactive_shell import cli_help as _cli_help
 from app.cli.interactive_shell import commands as _commands
 from app.cli.interactive_shell import follow_up as _follow_up
 from app.cli.interactive_shell import prompt_surface as _prompt_surface
-from app.cli.interactive_shell import router as _router
 from app.cli.interactive_shell.banner import render_banner
 from app.cli.interactive_shell.config import ReplConfig
 from app.cli.interactive_shell.hot_reload import HotReloadCoordinator
+from app.cli.interactive_shell.routing import router as _router
 from app.cli.interactive_shell.session import ReplSession
 from app.cli.interactive_shell.tasks import TaskRegistry
 from app.cli.interactive_shell.theme import DIM, ERROR, WARNING

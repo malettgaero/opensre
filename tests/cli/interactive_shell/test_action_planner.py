@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
+import app.cli.interactive_shell.action_planner as action_planner_module
 from app.cli.interactive_shell.action_planner import (
     plan_actions_with_unhandled,
     plan_cli_actions,
@@ -28,7 +33,11 @@ def test_plan_terminal_tasks_returns_kinds() -> None:
 
 def test_plan_synthetic_test_without_scenario_uses_default() -> None:
     msg = "run a single synthetic test"
-    actions, unhandled = plan_actions_with_unhandled(msg)
+    with patch(
+        "app.cli.interactive_shell.action_planner.resolve_synthetic_scenario_with_llm",
+        return_value=None,
+    ):
+        actions, unhandled = plan_actions_with_unhandled(msg)
 
     assert not unhandled
     assert [(a.kind, a.content) for a in actions] == [
@@ -58,6 +67,88 @@ def test_plan_typoed_synthetic_test_with_explicit_scenario_id() -> None:
     ]
     assert plan_terminal_tasks(msg) == ["synthetic_test"]
     assert plan_cli_actions(msg) == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ambiguous synthetic scenario text → LLM resolver (mocked)
+#
+# Canonical IDs like ``005-failover`` are matched deterministically. Bare
+# numbers ("003") and descriptive phrases require
+# ``resolve_synthetic_scenario_with_llm``; these tests pin planner wiring by
+# mocking that helper rather than calling a live model.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def _clear_scenario_cache() -> None:
+    """Drop the lru_cache so each test sees a fresh scenario list snapshot."""
+    action_planner_module._list_rds_postgres_scenarios.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "message,resolved_id,expected_content",
+    [
+        (
+            "run synthetic test 002",
+            "002-connection-exhaustion",
+            "rds_postgres:002-connection-exhaustion",
+        ),
+        ("run synthetic test 003", "003-storage-full", "rds_postgres:003-storage-full"),
+        ("launch synthetic test 005", "005-failover", "rds_postgres:005-failover"),
+        ("run synthetic test 003.", "003-storage-full", "rds_postgres:003-storage-full"),
+        ("rnu syntehtic tset 003", "003-storage-full", "rds_postgres:003-storage-full"),
+    ],
+)
+def test_plan_synthetic_test_uses_llm_resolver_when_no_full_scenario_id(
+    message: str,
+    resolved_id: str,
+    expected_content: str,
+    _clear_scenario_cache: None,
+) -> None:
+    with patch(
+        "app.cli.interactive_shell.action_planner.resolve_synthetic_scenario_with_llm",
+        return_value=resolved_id,
+    ):
+        actions, unhandled = plan_actions_with_unhandled(message)
+
+    assert not unhandled
+    assert [(a.kind, a.content) for a in actions] == [("synthetic_test", expected_content)]
+    assert plan_terminal_tasks(message) == ["synthetic_test"]
+    assert plan_cli_actions(message) == []
+
+
+def test_plan_synthetic_test_unknown_bare_number_falls_back_to_default(
+    _clear_scenario_cache: None,
+) -> None:
+    """When the LLM resolver declines (``None``), use the default scenario."""
+    msg = "run synthetic test 999"
+    with patch(
+        "app.cli.interactive_shell.action_planner.resolve_synthetic_scenario_with_llm",
+        return_value=None,
+    ):
+        actions, unhandled = plan_actions_with_unhandled(msg)
+
+    assert not unhandled
+    assert [(a.kind, a.content) for a in actions] == [
+        ("synthetic_test", "rds_postgres:001-replication-lag")
+    ]
+
+
+def test_plan_synthetic_test_bare_number_does_not_clobber_full_id(
+    _clear_scenario_cache: None,
+) -> None:
+    """A canonical full scenario slug wins without consulting the LLM resolver."""
+    msg = "run synthetic test 003-storage-full"
+    with patch(
+        "app.cli.interactive_shell.action_planner.resolve_synthetic_scenario_with_llm",
+    ) as mock_resolve:
+        actions, unhandled = plan_actions_with_unhandled(msg)
+
+    mock_resolve.assert_not_called()
+    assert not unhandled
+    assert [(a.kind, a.content) for a in actions] == [
+        ("synthetic_test", "rds_postgres:003-storage-full")
+    ]
 
 
 def test_plan_terminal_tasks_returns_implementation_action() -> None:

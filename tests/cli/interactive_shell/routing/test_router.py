@@ -6,11 +6,11 @@ from pathlib import Path
 
 import yaml
 
-import app.cli.interactive_shell.router as _router_module
-from app.cli.interactive_shell.router import RouteKind, classify_input, route_input
+from app.cli.interactive_shell.routing import router as _router_module
+from app.cli.interactive_shell.routing.router import RouteKind, classify_input, route_input
 from app.cli.interactive_shell.session import ReplSession
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 
 
 class TestClassifyInput:

@@ -27,7 +27,7 @@ from app.cli.interactive_shell.prompt_surface import (
     _build_prompt_style,
     _tab_expand_or_menu,
 )
-from app.cli.interactive_shell.router import RouteDecision, RouteKind
+from app.cli.interactive_shell.routing.route_types import RouteDecision, RouteKind
 from app.cli.interactive_shell.session import ReplSession
 from app.cli.interactive_shell.theme import ANSI_RESET, PROMPT_ACCENT_ANSI
 

@@ -7,8 +7,13 @@ shell router.  The regex rules in router.py handle high-confidence cases
 ambiguous mid-tier inputs that regex alone cannot reliably separate.
 
 Design constraints:
-- Uses the lightweight toolcall model (Claude Haiku / GPT-4o-mini) for
-  cost-efficiency and low added latency.
+- Uses the mid-tier classification model (Claude Sonnet / GPT-5 mini /
+  Gemini Flash, depending on provider) via
+  :func:`app.services.llm_client.get_llm_for_classification`. Sonnet-class
+  models follow multi-rule classifier prompts substantially more reliably
+  than Haiku-tier models while remaining materially cheaper than the
+  reasoning tier — a good trade-off for routing decisions where a
+  misclassification sends the user down the wrong pipeline.
 - Returns None on any failure (model unavailable, timeout, parse error)
   so the router can fall back to the legacy rule-based path.
 - Only *successful* classifications are cached; transient LLM failures are
@@ -22,10 +27,12 @@ from __future__ import annotations
 import logging
 import re
 from functools import lru_cache
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from app.cli.interactive_shell.router import RouteDecision, RoutingSession
+from app.cli.interactive_shell.routing.route_types import (
+    RouteDecision,
+    RouteKind,
+    RoutingSession,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +125,13 @@ def _sanitise_text(text: str) -> str:
 
 
 def _call_llm(sanitised_text: str, has_prior_state: bool) -> str | None:
-    """Call the lightweight toolcall LLM and return the raw response text.
+    """Call the mid-tier classification LLM and return the raw response text.
 
     Returns None if the LLM client is unavailable or raises an exception.
     The caller is responsible for passing sanitised text.
     """
     try:
-        from app.services.llm_client import get_llm_for_tools
+        from app.services.llm_client import get_llm_for_classification
     except Exception:
         logger.debug("llm_intent_classifier: LLM client import failed; skipping")
         return None
@@ -134,7 +141,7 @@ def _call_llm(sanitised_text: str, has_prior_state: bool) -> str | None:
     prompt = f"{_SYSTEM_PROMPT}\n\n{user_message}"
 
     try:
-        client = get_llm_for_tools()
+        client = get_llm_for_classification()
         response = client.invoke(prompt)
         return response.content.strip()
     except Exception as exc:
@@ -187,7 +194,7 @@ def classify_intent_with_llm(
     text: str,
     session: RoutingSession,
 ) -> RouteDecision | None:
-    """Classify *text* using the lightweight toolcall LLM.
+    """Classify *text* using the mid-tier classification LLM (Sonnet-class).
 
     Returns a :class:`RouteDecision` on success, or ``None`` when the LLM is
     unavailable / returns an unparseable response, signalling the caller to
@@ -198,9 +205,6 @@ def classify_intent_with_llm(
     - ``follow_up`` is only returned when ``session.last_state`` is set.
     - Transient LLM failures are not cached so the next call retries.
     """
-    # Deferred import to avoid a circular dependency at module load time.
-    from app.cli.interactive_shell.router import RouteDecision, RouteKind
-
     has_prior = session.last_state is not None
     sanitised = _sanitise_text(text.strip())
     route_word = _classify_with_retry_on_none(sanitised, has_prior)

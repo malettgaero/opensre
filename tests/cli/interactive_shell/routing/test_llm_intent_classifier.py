@@ -18,11 +18,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.cli.interactive_shell.llm_intent_classifier import (
+from app.cli.interactive_shell.routing.llm_intent_classifier import (
     classify_intent_with_llm,
     clear_classify_cache,
 )
-from app.cli.interactive_shell.router import RouteDecision, RouteKind, route_input
+from app.cli.interactive_shell.routing.router import RouteDecision, RouteKind, route_input
 from app.cli.interactive_shell.session import ReplSession
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,11 +49,17 @@ def _disable_llm_routing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENSRE_DISABLE_LLM_ROUTING", "1")
     # The module-level constant is read once at import time, so we patch the
     # flag on the module object directly.
-    monkeypatch.setattr("app.cli.interactive_shell.router._LLM_ROUTING_DISABLED", True)
+    monkeypatch.setattr("app.cli.interactive_shell.routing.router._LLM_ROUTING_DISABLED", True)
 
 
 def _mock_llm_response(response_text: str) -> MagicMock:
-    """Return a mock LLM client whose ``invoke`` returns *response_text*."""
+    """Return a mock LLM client whose ``invoke`` returns *response_text*.
+
+    Note: tests patch ``app.services.llm_client.get_llm_for_classification``
+    (the Sonnet-class mid-tier helper) — this is the helper the intent
+    classifier now consults, after migrating off ``get_llm_for_tools`` so
+    that the multi-rule classifier prompt is followed reliably.
+    """
     mock_response = MagicMock()
     mock_response.content = response_text
     mock_client = MagicMock()
@@ -72,7 +78,7 @@ class TestClassifyIntentWithLLM:
     def test_llm_cli_agent_response_parsed(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("cli_agent"),
         ):
             decision = classify_intent_with_llm(
@@ -85,7 +91,7 @@ class TestClassifyIntentWithLLM:
     def test_llm_new_alert_response_parsed(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("new_alert"),
         ):
             decision = classify_intent_with_llm(
@@ -97,7 +103,7 @@ class TestClassifyIntentWithLLM:
     def test_llm_follow_up_response_parsed(self) -> None:
         session = _fresh_session(with_prior_state=True)
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("follow_up"),
         ):
             decision = classify_intent_with_llm("why did it fail?", session)
@@ -107,7 +113,7 @@ class TestClassifyIntentWithLLM:
     def test_llm_cli_help_response_parsed(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("cli_help"),
         ):
             decision = classify_intent_with_llm("how do I configure datadog?", session)
@@ -117,7 +123,7 @@ class TestClassifyIntentWithLLM:
     def test_llm_slash_response_parsed(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("slash"),
         ):
             decision = classify_intent_with_llm("/status", session)
@@ -128,7 +134,7 @@ class TestClassifyIntentWithLLM:
         """LLM may include leading/trailing whitespace; parse should still work."""
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("  cli_agent  "),
         ):
             decision = classify_intent_with_llm("show connected services", session)
@@ -139,7 +145,7 @@ class TestClassifyIntentWithLLM:
         """Even if LLM adds explanation, the route word should be extracted."""
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response(
                 "Based on the input this should be classified as: new_alert"
             ),
@@ -152,7 +158,7 @@ class TestClassifyIntentWithLLM:
         """An unparseable LLM response should return None (trigger fallback)."""
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("I cannot classify this."),
         ):
             decision = classify_intent_with_llm("some input", session)
@@ -162,7 +168,7 @@ class TestClassifyIntentWithLLM:
         """ImportError from the LLM client must return None, not raise."""
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             side_effect=ImportError("no llm client"),
         ):
             decision = classify_intent_with_llm("database is slow", session)
@@ -174,7 +180,7 @@ class TestClassifyIntentWithLLM:
         mock_client = MagicMock()
         mock_client.invoke.side_effect = RuntimeError("timeout")
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=mock_client,
         ):
             decision = classify_intent_with_llm("something happened", session)
@@ -185,7 +191,7 @@ class TestClassifyIntentWithLLM:
         session = _fresh_session()
         mock_client = _mock_llm_response("cli_agent")
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=mock_client,
         ):
             classify_intent_with_llm("run synthetic test 001", session)
@@ -198,7 +204,7 @@ class TestClassifyIntentWithLLM:
         session_with_prior = _fresh_session(with_prior_state=True)
         mock_client = _mock_llm_response("cli_agent")
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=mock_client,
         ):
             classify_intent_with_llm("why?", session_no_prior)
@@ -209,7 +215,7 @@ class TestClassifyIntentWithLLM:
     def test_confidence_is_set_on_llm_decision(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("cli_agent"),
         ):
             decision = classify_intent_with_llm("run synthetic test 003-cpu-spike", session)
@@ -227,14 +233,13 @@ class TestRouteInputWithLLM:
 
     @pytest.fixture(autouse=True)
     def _enable_llm_routing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Re-enable the LLM routing pipeline for this test class.
+        """Force ``route_input`` past ``_LLM_ROUTING_DISABLED`` for this class.
 
-        The conftest disables LLM routing by default (to prevent live LLM
-        calls in unrelated tests).  Tests in this class need the LLM branch
-        of ``route_input`` to be active so they can verify that the mocked
-        ``classify_intent_with_llm`` is actually invoked.
+        Interactive-shell tests may patch the router flag or set
+        ``OPENSRE_DISABLE_LLM_ROUTING``; here we ensure phase-2 runs so the
+        patched ``classify_intent_with_llm`` is actually invoked.
         """
-        monkeypatch.setattr("app.cli.interactive_shell.router._LLM_ROUTING_DISABLED", False)
+        monkeypatch.setattr("app.cli.interactive_shell.routing.router._LLM_ROUTING_DISABLED", False)
 
     def _patch_llm_classifier(self, route_kind: str) -> MagicMock:
         """Return a mock for ``classify_intent_with_llm`` returning *route_kind*."""
@@ -256,7 +261,7 @@ class TestRouteInputWithLLM:
         """
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("cli_agent"),
         ):
             decision = route_input("run synthetic test 002-connection-exhaustion", session)
@@ -267,7 +272,7 @@ class TestRouteInputWithLLM:
         """'memory' is an alert signal; LLM must not be fooled by it in an ID."""
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("cli_agent"),
         ):
             decision = route_input("run synthetic test 005-memory-pressure", session)
@@ -276,7 +281,7 @@ class TestRouteInputWithLLM:
     def test_synthetic_test_with_cpu_in_id_routes_cli_agent(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("cli_agent"),
         ):
             decision = route_input("launch synthetic test 003-cpu-spike", session)
@@ -285,7 +290,7 @@ class TestRouteInputWithLLM:
     def test_real_alert_routes_new_alert_via_llm(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("new_alert"),
         ):
             decision = route_input(
@@ -296,7 +301,7 @@ class TestRouteInputWithLLM:
     def test_follow_up_with_prior_state_via_llm(self) -> None:
         session = _fresh_session(with_prior_state=True)
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("follow_up"),
         ):
             decision = route_input("what caused the spike?", session)
@@ -305,7 +310,7 @@ class TestRouteInputWithLLM:
     def test_cli_help_via_llm(self) -> None:
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             self._patch_llm_classifier("cli_help"),
         ):
             decision = route_input("how do I set up the datadog integration?", session)
@@ -316,7 +321,7 @@ class TestRouteInputWithLLM:
         session = _fresh_session()
         mock_llm = MagicMock()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             mock_llm,
         ):
             decision = route_input("/help", session)
@@ -328,7 +333,7 @@ class TestRouteInputWithLLM:
         session = _fresh_session()
         mock_llm = MagicMock()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             mock_llm,
         ):
             decision = route_input("help", session)
@@ -339,7 +344,7 @@ class TestRouteInputWithLLM:
         """When LLM returns None (unavailable), the regex rules must still route correctly."""
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=None,
         ):
             # "how do I run an investigation?" matches a CLI help regex.
@@ -350,7 +355,7 @@ class TestRouteInputWithLLM:
         """Without LLM, alert-signal regex still routes real alerts to new_alert."""
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=None,
         ):
             decision = route_input("CPU spiked on orders-api", session)
@@ -365,7 +370,7 @@ class TestRouteInputWithLLM:
             matched_signals=("llm_intent_classifier",),
         )
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=llm_decision,
         ):
             decision = route_input("run synthetic benchmark", session)
@@ -469,7 +474,7 @@ class TestAlertVocabularyInNonAlertContexts:
     @pytest.fixture(autouse=True)
     def _enable_llm_routing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Re-enable the LLM routing pipeline for this test class."""
-        monkeypatch.setattr("app.cli.interactive_shell.router._LLM_ROUTING_DISABLED", False)
+        monkeypatch.setattr("app.cli.interactive_shell.routing.router._LLM_ROUTING_DISABLED", False)
 
     @pytest.mark.parametrize(
         "text,llm_route,expected_kind",
@@ -543,7 +548,7 @@ class TestAlertVocabularyInNonAlertContexts:
             matched_signals=("llm_intent_classifier",),
         )
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=mock_decision,
         ):
             decision = route_input(text, session)
@@ -563,7 +568,7 @@ class TestLLMRoutingDisabledFlag:
     def test_llm_not_called_when_disabled(self, _disable_llm_routing: None) -> None:
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm"
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm"
         ) as mock_llm:
             route_input("run synthetic test 002-connection-exhaustion", session)
         mock_llm.assert_not_called()
@@ -571,7 +576,7 @@ class TestLLMRoutingDisabledFlag:
     def test_llm_not_called_for_any_input_when_disabled(self, _disable_llm_routing: None) -> None:
         session = _fresh_session()
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm"
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm"
         ) as mock_llm:
             for text in (
                 "why is the database slow?",
@@ -595,7 +600,7 @@ class TestRouteDecisionFromLLM:
     @pytest.fixture(autouse=True)
     def _enable_llm_routing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Re-enable the LLM routing pipeline for this test class."""
-        monkeypatch.setattr("app.cli.interactive_shell.router._LLM_ROUTING_DISABLED", False)
+        monkeypatch.setattr("app.cli.interactive_shell.routing.router._LLM_ROUTING_DISABLED", False)
 
     def test_llm_route_decision_event_payload(self) -> None:
         session = _fresh_session()
@@ -605,7 +610,7 @@ class TestRouteDecisionFromLLM:
             matched_signals=("llm_intent_classifier",),
         )
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=llm_decision,
         ):
             decision = route_input("run synthetic test 002-connection-exhaustion", session)
@@ -624,7 +629,7 @@ class TestRouteDecisionFromLLM:
             matched_signals=("llm_intent_classifier",),
         )
         with patch(
-            "app.cli.interactive_shell.llm_intent_classifier.classify_intent_with_llm",
+            "app.cli.interactive_shell.routing.llm_intent_classifier.classify_intent_with_llm",
             return_value=llm_decision,
         ):
             decision = route_input("502 errors in production", session)
@@ -643,7 +648,7 @@ class TestClearClassifyCache:
         session = _fresh_session()
         mock_client = _mock_llm_response("cli_agent")
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=mock_client,
         ):
             classify_intent_with_llm("run synthetic test 001", session)
@@ -669,10 +674,10 @@ class TestSafetyBehaviours:
         fail_client.invoke.side_effect = RuntimeError("network error")
         ok_client = _mock_llm_response("cli_agent")
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=fail_client):
+        with patch("app.services.llm_client.get_llm_for_classification", return_value=fail_client):
             result_1 = classify_intent_with_llm("run test", session)
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=ok_client):
+        with patch("app.services.llm_client.get_llm_for_classification", return_value=ok_client):
             result_2 = classify_intent_with_llm("run test", session)
 
         assert result_1 is None
@@ -685,10 +690,12 @@ class TestSafetyBehaviours:
         garbage_client = _mock_llm_response("I have no idea")
         ok_client = _mock_llm_response("new_alert")
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=garbage_client):
+        with patch(
+            "app.services.llm_client.get_llm_for_classification", return_value=garbage_client
+        ):
             first = classify_intent_with_llm("orders api 502", session)
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=ok_client):
+        with patch("app.services.llm_client.get_llm_for_classification", return_value=ok_client):
             second = classify_intent_with_llm("orders api 502", session)
 
         assert first is None
@@ -701,7 +708,7 @@ class TestSafetyBehaviours:
         """If LLM returns follow_up but session has no prior state, override to cli_agent."""
         session = _fresh_session(with_prior_state=False)
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("follow_up"),
         ):
             decision = classify_intent_with_llm("why did it fail?", session)
@@ -712,7 +719,7 @@ class TestSafetyBehaviours:
         """follow_up is only suppressed when session.last_state is None."""
         session = _fresh_session(with_prior_state=True)
         with patch(
-            "app.services.llm_client.get_llm_for_tools",
+            "app.services.llm_client.get_llm_for_classification",
             return_value=_mock_llm_response("follow_up"),
         ):
             decision = classify_intent_with_llm("why did it fail?", session)
@@ -723,13 +730,13 @@ class TestSafetyBehaviours:
 
     def test_long_input_truncated_before_llm_call(self) -> None:
         """Input longer than _MAX_TEXT_LEN must be truncated before entering the prompt."""
-        from app.cli.interactive_shell import llm_intent_classifier
+        from app.cli.interactive_shell.routing import llm_intent_classifier
 
         session = _fresh_session()
         long_text = "run test " + "A" * 600
         mock_client = _mock_llm_response("cli_agent")
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=mock_client):
+        with patch("app.services.llm_client.get_llm_for_classification", return_value=mock_client):
             classify_intent_with_llm(long_text, session)
 
         assert mock_client.invoke.call_count == 1
@@ -742,7 +749,7 @@ class TestSafetyBehaviours:
         injected = "run test\x00\x01\x1b[31mevil\x1b[0m"
         mock_client = _mock_llm_response("cli_agent")
 
-        with patch("app.services.llm_client.get_llm_for_tools", return_value=mock_client):
+        with patch("app.services.llm_client.get_llm_for_classification", return_value=mock_client):
             decision = classify_intent_with_llm(injected, session)
 
         assert decision is not None

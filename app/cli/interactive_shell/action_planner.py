@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
+from pathlib import Path
 
 from app.cli.interactive_shell.intent_parser import (
     ACTION_PATTERNS,
@@ -23,26 +25,82 @@ from app.cli.interactive_shell.intent_parser import (
     synthetic_test_action,
 )
 from app.cli.interactive_shell.interaction_models import PlannedAction, PromptClause
+from app.cli.interactive_shell.routing.llm_synthetic_scenario_resolver import (
+    resolve_synthetic_scenario_with_llm,
+)
 from app.cli.interactive_shell.terminal_intent import mentioned_integration_services
 
+# Deterministic match for an already-canonical scenario ID like "003-storage-full".
+# A regex is appropriate here because the format is exact and unambiguous; no
+# inference is needed. Anything looser ("003", "the storage full one") is
+# resolved by the LLM-backed scenario resolver below.
 _SYNTHETIC_SCENARIO_ID_RE = re.compile(
     r"\b(?P<scenario>\d{3}-[a-z0-9][a-z0-9-]*)\b",
     re.IGNORECASE,
 )
 DEFAULT_SYNTHETIC_SCENARIO = "001-replication-lag"
 
+_RDS_POSTGRES_SUITE_DIR = (
+    Path(__file__).resolve().parents[3] / "tests" / "synthetic" / "rds_postgres"
+)
+
+
+@lru_cache(maxsize=1)
+def _list_rds_postgres_scenarios() -> tuple[str, ...]:
+    """Enumerate available RDS Postgres synthetic scenario directory names.
+
+    Returns a tuple of names like ("001-replication-lag", "002-connection-exhaustion", ...).
+    Cached because the suite layout is static at runtime. Returns an empty
+    tuple when the directory is missing (trimmed installs, packaging).
+
+    The list is passed to the LLM resolver as a strict allowlist so the model
+    can only ever return a real scenario.
+    """
+    if not _RDS_POSTGRES_SUITE_DIR.is_dir():
+        return ()
+    return tuple(
+        sorted(
+            entry.name
+            for entry in _RDS_POSTGRES_SUITE_DIR.iterdir()
+            if entry.is_dir()
+            and len(entry.name) >= 5
+            and entry.name[:3].isdigit()
+            and entry.name[3] == "-"
+        )
+    )
+
 
 def _synthetic_action_content(clause: PromptClause, *, synthetic_start: int) -> tuple[str, int]:
-    scenario_match = _SYNTHETIC_SCENARIO_ID_RE.search(clause.text)
-    if scenario_match is None:
+    """Resolve the scenario the user asked for to a ``rds_postgres:<id>`` token.
+
+    Resolution order:
+    1. A canonical full ID (``003-storage-full``) is taken verbatim — no LLM
+       needed when the user already typed the directory name.
+    2. Otherwise an LLM intent classifier picks the scenario from the live
+       allowlist. This handles bare numbers ("003", "test 3"), descriptive
+       phrases ("the storage full one", "cpu saturation"), and typos.
+    3. If the LLM is unavailable / undecided, fall back to the default
+       scenario so the planner never silently misroutes to a stale ID.
+    """
+    full_match = _SYNTHETIC_SCENARIO_ID_RE.search(clause.text)
+    if full_match is not None:
+        scenario_id = full_match.group("scenario").lower()
         return (
-            f"rds_postgres:{DEFAULT_SYNTHETIC_SCENARIO}",
+            f"rds_postgres:{scenario_id}",
+            clause.position + full_match.start("scenario"),
+        )
+
+    scenarios = _list_rds_postgres_scenarios()
+    resolved = resolve_synthetic_scenario_with_llm(clause.text, scenarios)
+    if resolved is not None:
+        return (
+            f"rds_postgres:{resolved}",
             clause.position + synthetic_start,
         )
-    scenario_id = scenario_match.group("scenario").lower()
+
     return (
-        f"rds_postgres:{scenario_id}",
-        clause.position + scenario_match.start("scenario"),
+        f"rds_postgres:{DEFAULT_SYNTHETIC_SCENARIO}",
+        clause.position + synthetic_start,
     )
 
 

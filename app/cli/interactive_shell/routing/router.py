@@ -6,9 +6,11 @@ Routing pipeline (highest confidence wins, evaluated left-to-right):
    correct; never calls the LLM.
 2. **LLM intent classification** – for inputs that cleared the fast-path but
    are still ambiguous (e.g. distinguishing "run synthetic test …" from a
-   real alert description).  Uses the lightweight toolcall model so latency
-   impact is minimal.  If the LLM is unavailable the router falls through to
-   step 3 transparently.
+   real alert description).  Uses the mid-tier classification model
+   (Sonnet-class), which follows the multi-rule classifier prompt much more
+   reliably than Haiku-tier toolcall models while staying well under
+   reasoning-tier cost.  If the LLM is unavailable the router falls through
+   to step 3 transparently.
 3. **Regex rule-set fallback** – the legacy pattern-based rules that were the
    sole classifier before the LLM layer was added.  These remain as a
    reliable offline / zero-latency fallback.
@@ -19,15 +21,18 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Callable
-from dataclasses import dataclass
-from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Literal
 
 from app.cli.interactive_shell.action_planner import plan_actions_with_unhandled
 from app.cli.interactive_shell.intent_parser import (
     is_single_edit_typo,
     normalize_intent_text,
+)
+from app.cli.interactive_shell.routing.route_types import (
+    RouteDecision,
+    RouteKind,
+    RouteRule,
+    RoutingSession,
 )
 from app.cli.interactive_shell.terminal_intent import (
     is_sample_alert_launch_intent,
@@ -48,44 +53,6 @@ InputKind = Literal["slash", "cli_help", "cli_agent", "new_alert", "follow_up"]
 # Rule names that are part of the deterministic fast-path and must never be
 # handed to the LLM classifier (they are always correct by definition).
 _FAST_PATH_RULE_NAMES: frozenset[str] = frozenset({"slash_prefix", "bare_command_alias"})
-
-
-class RoutingSession(Protocol):
-    last_state: dict[str, object] | None
-
-
-class RouteKind(StrEnum):
-    SLASH = "slash"
-    CLI_HELP = "cli_help"
-    CLI_AGENT = "cli_agent"
-    NEW_ALERT = "new_alert"
-    FOLLOW_UP = "follow_up"
-
-
-@dataclass(frozen=True)
-class RouteDecision:
-    route_kind: RouteKind
-    confidence: float
-    # Must contain only internal rule names; never user-derived content.
-    matched_signals: tuple[str, ...] = ()
-    fallback_reason: str | None = None
-
-    def to_event_payload(self) -> dict[str, str | bool | int | float]:
-        """Structured telemetry/debug payload for route decisions."""
-        return {
-            "route_kind": self.route_kind.value,
-            "confidence": self.confidence,
-            "matched_signals": ",".join(self.matched_signals),
-            "fallback_reason": self.fallback_reason or "",
-        }
-
-
-@dataclass(frozen=True)
-class RouteRule:
-    name: str
-    route_kind: RouteKind
-    confidence: float
-    matcher: Callable[[str, RoutingSession], bool]
 
 
 def _is_slash_prefix(text: str, _session: RoutingSession) -> bool:
@@ -480,7 +447,9 @@ def route_input(text: str, session: RoutingSession) -> RouteDecision:
 
     # ── Phase 2: LLM intent classification ────────────────────────────────────
     if not _LLM_ROUTING_DISABLED:
-        from app.cli.interactive_shell.llm_intent_classifier import classify_intent_with_llm
+        from app.cli.interactive_shell.routing.llm_intent_classifier import (
+            classify_intent_with_llm,
+        )
 
         llm_decision = classify_intent_with_llm(stripped, session)
         if llm_decision is not None:
