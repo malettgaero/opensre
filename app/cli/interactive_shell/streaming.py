@@ -55,23 +55,37 @@ def _console_file_is_a_tty(console: Console) -> bool:
 
 def _run_throttled_markdown_loop(
     *,
-    preview: Callable[[Any], None],
+    preview: Callable[[Any], None] | None = None,
     chunks_iter: Iterator[str],
     buffer: list[str],
     next_chunk: Callable[[Iterator[str]], str | None],
+    # Backward-compat alias for long-lived REPL sessions where a hot reload
+    # swapped this function under a caller that still binds the old keyword.
+    # Once all callers have been refreshed (next REPL restart), this can go.
+    set_view: Callable[[Any], None] | None = None,
+    **_legacy_kwargs: Any,
 ) -> None:
     """Drain chunks into ``buffer`` and emit preview frames at most every
     ``_LIVE_RENDER_INTERVAL_S`` seconds.
 
-    ``preview`` is called only with intermediate, possibly-cropped frames. It
-    must NOT be relied on to render the final full response — callers are
-    responsible for printing the final Markdown once after this loop returns,
-    so that the visible result is one static block rather than a stack of
-    re-renders that accumulate in terminal scrollback.
+    ``preview`` (legacy alias: ``set_view``) is called only with intermediate,
+    possibly-cropped frames. It must NOT be relied on to render the final full
+    response — callers are responsible for printing the final Markdown once
+    after this loop returns, so that the visible result is one static block
+    rather than a stack of re-renders that accumulate in terminal scrollback.
+
+    Unknown keyword arguments are absorbed silently so a hot-reloaded module
+    whose call site was edited can never crash a long-lived shell with a
+    ``TypeError: unexpected keyword argument`` — the user just sees the new
+    signature's behaviour next turn.
     """
+    renderer = preview or set_view
+    if renderer is None:
+        raise ValueError("stream preview callback is required")
+
     last_render = 0.0
     if buffer:
-        preview(Markdown("".join(buffer), code_theme="ansi_dark"))
+        renderer(Markdown("".join(buffer), code_theme="ansi_dark"))
         last_render = time.monotonic()
     while True:
         chunk = next_chunk(chunks_iter)
@@ -82,7 +96,7 @@ def _run_throttled_markdown_loop(
         buffer.append(chunk)
         now = time.monotonic()
         if now - last_render >= _LIVE_RENDER_INTERVAL_S:
-            preview(Markdown("".join(buffer), code_theme="ansi_dark"))
+            renderer(Markdown("".join(buffer), code_theme="ansi_dark"))
             last_render = now
 
 
