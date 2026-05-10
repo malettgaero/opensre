@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.text import Text
 
-from app.cli.interactive_shell.theme import (
+from app.cli.interactive_shell.ui.theme import (
     BRAND,
     DIM,
     ERROR,
@@ -389,7 +389,7 @@ class _EventLogDisplay:
             return
         from rich.markdown import Markdown
 
-        from app.cli.interactive_shell.theme import MARKDOWN_THEME
+        from app.cli.interactive_shell.ui.theme import MARKDOWN_THEME
 
         with self._live.console.use_theme(MARKDOWN_THEME):
             self._live.console.print(Markdown(text, code_theme="ansi_dark"))

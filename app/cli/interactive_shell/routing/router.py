@@ -23,20 +23,20 @@ import os
 import re
 from typing import Literal
 
-from app.cli.interactive_shell.action_planner import plan_actions_with_unhandled
-from app.cli.interactive_shell.intent_parser import (
+from app.cli.interactive_shell.intent.intent_parser import (
     is_single_edit_typo,
     normalize_intent_text,
 )
+from app.cli.interactive_shell.intent.terminal_intent import (
+    is_sample_alert_launch_intent,
+    mentions_alert_signal,
+)
+from app.cli.interactive_shell.orchestration.action_planner import plan_actions_with_unhandled
 from app.cli.interactive_shell.routing.route_types import (
     RouteDecision,
     RouteKind,
     RouteRule,
     RoutingSession,
-)
-from app.cli.interactive_shell.terminal_intent import (
-    is_sample_alert_launch_intent,
-    mentions_alert_signal,
 )
 
 # Set OPENSRE_DISABLE_LLM_ROUTING=1 to skip the LLM classification step and

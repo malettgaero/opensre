@@ -23,7 +23,7 @@ from app.cli.interactive_shell.routing.llm_intent_classifier import (
     clear_classify_cache,
 )
 from app.cli.interactive_shell.routing.router import RouteDecision, RouteKind, route_input
-from app.cli.interactive_shell.session import ReplSession
+from app.cli.interactive_shell.runtime.session import ReplSession
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers / fixtures

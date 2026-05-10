@@ -60,6 +60,7 @@ class ScenarioAnswerKey:
     root_cause_category: str
     required_keywords: list[str]
     model_response: str
+    equivalent_root_cause_categories: tuple[str, ...] = ()
     forbidden_categories: list[str] = ()  # type: ignore[assignment]
     forbidden_keywords: list[str] = ()  # type: ignore[assignment]
     required_evidence_sources: list[str] = ()  # type: ignore[assignment]
@@ -282,10 +283,16 @@ def _parse_answer_yaml(path: Path) -> ScenarioAnswerKey:
             max_loops=_parse_non_negative_int(golden_trajectory_raw, "max_loops"),
         )
 
+    equivalent_raw = validated.get("equivalent_root_cause_categories") or []
+    equivalent_root_cause_categories = tuple(
+        str(item).strip() for item in equivalent_raw if str(item).strip()
+    )
+
     return ScenarioAnswerKey(
         root_cause_category=validated["root_cause_category"].strip(),
         required_keywords=[k.strip() for k in validated["required_keywords"]],
         model_response=validated["model_response"].strip(),
+        equivalent_root_cause_categories=equivalent_root_cause_categories,
         forbidden_categories=list(validated.get("forbidden_categories") or []),
         forbidden_keywords=list(validated.get("forbidden_keywords") or []),
         required_evidence_sources=list(validated.get("required_evidence_sources") or []),

@@ -197,6 +197,8 @@ class AnswerKeySchema(TypedDict):
     root_cause_category: str
     required_keywords: list[str]
     model_response: str
+    # Additional categories that pass the category gate alongside root_cause_category
+    equivalent_root_cause_categories: NotRequired[list[str]]
     # Optional adversarial constraints (level 2+ scenarios)
     forbidden_categories: NotRequired[list[str]]  # root_cause_category must NOT be any of these
     forbidden_keywords: NotRequired[list[str]]  # none of these may appear in evidence_text
@@ -464,10 +466,21 @@ def validate_answer_key(data: dict[str, Any]) -> AnswerKeySchema:
         "forbidden_categories",
         "forbidden_keywords",
         "required_evidence_sources",
+        "equivalent_root_cause_categories",
     ):
         val = data.get(opt_list_field)
         if val is not None and not isinstance(val, list):
             raise ValueError(f"answer.yml: '{opt_list_field}' must be a list when present")
+    equiv = data.get("equivalent_root_cause_categories")
+    if (
+        equiv is not None
+        and equiv
+        and not all(isinstance(item, str) and item.strip() for item in equiv)
+    ):
+        raise ValueError(
+            "answer.yml: 'equivalent_root_cause_categories' "
+            "must contain only non-empty strings when present"
+        )
     trajectory = data.get("optimal_trajectory")
     if trajectory is not None:
         if not isinstance(trajectory, list) or not trajectory:

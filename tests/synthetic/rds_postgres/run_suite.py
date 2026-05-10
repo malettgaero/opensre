@@ -94,12 +94,26 @@ class ReasoningScore:
     reasoning_score: float
 
 
+def _accepted_root_cause_categories(fixture: ScenarioFixture) -> frozenset[str]:
+    """Categories that satisfy the synthetic suite category gate.
+
+    `root_cause_category` is the canonical label; `equivalent_root_cause_categories`
+    lists additional taxonomy labels that should also pass (e.g. generic vs specific CPU).
+    """
+
+    key = fixture.answer_key
+    accepted: set[str] = {key.root_cause_category}
+    accepted.update(key.equivalent_root_cause_categories)
+    return frozenset(accepted)
+
+
 @dataclass(frozen=True)
 class ScenarioScore:
     scenario_id: str
     passed: bool
     root_cause_present: bool
     expected_category: str
+    accepted_categories: tuple[str, ...]
     actual_category: str
     missing_keywords: list[str]
     matched_keywords: list[str]
@@ -277,6 +291,16 @@ def _keyword_match_details(normalized_output: str, keyword: str) -> tuple[bool, 
         "replicationlag": (
             "replica lag",
             "replication delay",
+        ),
+        "causallyindependent": (
+            "red herring",
+            "not the root cause",
+            "unrelated confounder",
+            "no causal relationship",
+            "not causally related",
+            "coincidental",
+            "unrelated to the lag",
+            "not related to replication lag",
         ),
     }
     for alias in keyword_aliases.get(normalized_keyword.replace(" ", ""), ()):
@@ -459,6 +483,8 @@ def score_result(
     semantic_keyword_match = not semantic_missing_keywords
 
     answer_key = fixture.answer_key
+    accepted_cats = _accepted_root_cause_categories(fixture)
+    accepted_sorted = tuple(sorted(accepted_cats))
     trajectory = score_trajectory(fixture, final_state)
     reasoning = score_reasoning(fixture, final_state, queried_metrics)
     failures: list[FailureDetail] = []
@@ -475,20 +501,20 @@ def score_result(
     # 1. Category match
     if not root_cause_present:
         failures.append(FailureDetail(code="NO_ROOT_CAUSE", detail="no root cause in output"))
-    elif actual_category != answer_key.root_cause_category:
+    elif actual_category not in accepted_cats:
         failures.append(
             FailureDetail(
                 code="WRONG_CATEGORY",
                 detail=(
-                    f"wrong category: got {actual_category!r}, expected "
-                    f"{answer_key.root_cause_category!r}"
+                    f"wrong category: got {actual_category!r}, expected one of "
+                    f"{sorted(accepted_cats)!r}"
                 ),
             )
         )
     _mark_gate(
         "category_match",
-        root_cause_present and actual_category == answer_key.root_cause_category,
-        f"actual_category == {answer_key.root_cause_category!r}",
+        root_cause_present and actual_category in accepted_cats,
+        f"actual_category in {sorted(accepted_cats)!r}",
         f"root_cause_present={root_cause_present}, actual_category={actual_category!r}",
     )
 
@@ -694,6 +720,7 @@ def score_result(
         passed=passed,
         root_cause_present=root_cause_present,
         expected_category=fixture.answer_key.root_cause_category,
+        accepted_categories=accepted_sorted,
         actual_category=actual_category,
         missing_keywords=missing_keywords,
         matched_keywords=matched_keywords,

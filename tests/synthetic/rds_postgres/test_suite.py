@@ -87,6 +87,79 @@ def test_score_result_does_not_apply_failover_wording_to_storage_scenario() -> N
     assert score.passed is True
 
 
+def test_score_result_accepts_equivalent_cpu_saturation_category() -> None:
+    """Scenario 004 allows either generic CPU saturation or the specific bad-query label."""
+
+    fixture = load_scenario(SUITE_DIR / "004-cpu-saturation-bad-query")
+
+    final_state = {
+        "root_cause": (
+            "CPU saturation from a heavy query shown in Performance Insights "
+            "top SQL with AAS and avg load on the catalog database."
+        ),
+        "root_cause_category": "cpu_saturation",
+        "validated_claims": [],
+        "non_validated_claims": [],
+        "causal_chain": [],
+        "evidence": {
+            "grafana_metrics": {"placeholder": True},
+        },
+        "executed_hypotheses": [
+            {
+                "actions": [
+                    "query_grafana_metrics",
+                    "query_grafana_logs",
+                    "query_grafana_alert_rules",
+                ]
+            }
+        ],
+        "investigation_loop_count": 1,
+    }
+
+    score = score_result(fixture, final_state)
+
+    assert score.passed is True
+    assert score.actual_category == "cpu_saturation"
+    assert score.accepted_categories == ("cpu_saturation", "cpu_saturation_bad_query")
+
+
+def test_score_result_accepts_replication_lag_wal_volume_equivalent() -> None:
+    """Scenario 006 allows generic replication_lag or WAL-specific subcategory."""
+
+    fixture = load_scenario(SUITE_DIR / "006-replication-lag-cpu-redherring")
+
+    final_state = {
+        "root_cause": (
+            "Replication lag on the replica from WAL volume; the SELECT workload is a "
+            "red herring with avg load and AAS in Performance Insights. "
+            "UPDATE on primary drives WAL; SELECT analytics is unrelated to the lag."
+        ),
+        "root_cause_category": "replication_lag_wal_volume",
+        "validated_claims": [],
+        "non_validated_claims": [],
+        "causal_chain": [],
+        "evidence": {
+            "grafana_metrics": {"placeholder": True},
+        },
+        "executed_hypotheses": [
+            {
+                "actions": [
+                    "query_grafana_metrics",
+                    "query_grafana_logs",
+                    "query_grafana_alert_rules",
+                ]
+            }
+        ],
+        "investigation_loop_count": 1,
+    }
+
+    score = score_result(fixture, final_state)
+
+    assert score.passed is True
+    assert score.actual_category == "replication_lag_wal_volume"
+    assert score.accepted_categories == ("replication_lag", "replication_lag_wal_volume")
+
+
 def test_score_result_keeps_failover_event_reasoning_requirement() -> None:
     fixture = load_scenario(SUITE_DIR / "005-failover")
 

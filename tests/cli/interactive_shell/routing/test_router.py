@@ -8,7 +8,7 @@ import yaml
 
 from app.cli.interactive_shell.routing import router as _router_module
 from app.cli.interactive_shell.routing.router import RouteKind, classify_input, route_input
-from app.cli.interactive_shell.session import ReplSession
+from app.cli.interactive_shell.runtime.session import ReplSession
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 

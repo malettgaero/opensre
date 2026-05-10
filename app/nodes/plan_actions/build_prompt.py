@@ -96,18 +96,12 @@ def _build_available_sources_hint(available_sources: dict[str, dict]) -> str:
         loki_only = grafana.get("loki_only", False)
         no_traces = grafana.get("no_traces", False)
         grafana_label = "Grafana Local (Loki only)" if loki_only else "Grafana Cloud"
+        # The traces action is hard-filtered out of available_actions when
+        # no_traces is set (see GrafanaTracesTool._query_grafana_traces_available),
+        # so the prompt only needs to describe traces when they are actually
+        # selectable. For loki_only stacks Tempo is also absent.
         if loki_only or no_traces:
-            # Local Grafana has no Tempo; RDS alerts have no useful trace data.
-            # Emit an explicit prohibition so the planner never selects traces.
-            traces_hint = (
-                "\n- PROHIBITED: Do NOT call query_grafana_traces for this incident."
-                " This is an RDS/database resource-threshold alert — distributed traces"
-                " (Tempo) contain no data for infrastructure ceiling breaches (connections,"
-                " CPU, storage, IOPS). Selecting query_grafana_traces wastes the tool"
-                " budget and will be scored as an extra action."
-                if no_traces
-                else ""  # loki_only: just omit — no Tempo endpoint exists
-            )
+            traces_hint = ""
         else:
             traces_hint = (
                 "\n- Use query_grafana_traces to find distributed traces in Tempo"
