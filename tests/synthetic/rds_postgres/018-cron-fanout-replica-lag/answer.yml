@@ -1,0 +1,46 @@
+root_cause_category: replication_lag
+equivalent_root_cause_categories:
+  - replication_lag_wal_volume
+required_keywords:
+  - replica lag
+  - cronjob
+  - fan-out
+  - wal
+  - replay
+required_evidence_sources:
+  # Grafana+Mimir mocks surface these two reliably in the bundled runner; K8s files
+  # remain loaded for richer investigations without gating Axis-1 strictly on k8s tools.
+  - aws_cloudwatch_metrics
+  - aws_performance_insights
+forbidden_categories:
+  - infrastructure
+  - cpu_saturation
+optimal_trajectory:
+  - query_grafana_metrics
+  - query_grafana_logs
+  - describe_rds_events
+max_investigation_loops: 3
+golden_trajectory:
+  ordered_actions:
+    - query_grafana_metrics
+    - query_grafana_logs
+    - describe_rds_events
+  # Parallel investigation often permutes Grafana tools; planners swap alert_rules for
+  # describe_rds_events when corroborating lag from RDS event stream — order-agnostic.
+  matching: set
+  max_loops: 3
+model_response: |
+  ROOT_CAUSE: replication_lag was caused by Kubernetes CronJob fan-out in billing-worker, not by a failover or primary CPU collapse. The scheduled reconciliation CronJob increased parallel workers from 8 to 120, generating write bursts and WAL volume that the replica could not replay in real time. ReplicaLag climbed from 2s to 960s while primary CPU stayed moderate.
+  ROOT_CAUSE_CATEGORY: replication_lag
+
+  VALIDATED_CLAIMS:
+  - Kubernetes events show billing-reconcile CronJob fan-out from 8 to 120 concurrent jobs at 02:00 UTC. [evidence: k8s_events]
+  - Pod metrics confirm worker concurrency and write throughput burst in the billing namespace. [evidence: k8s_pod_metrics]
+  - CloudWatch shows ReplicaLag rising to 960s with only moderate primary CPU increase. [evidence: aws_cloudwatch_metrics]
+  - Performance Insights indicates WAL-related write pressure and replay contention, not a single blocking query. [evidence: aws_performance_insights]
+
+  CAUSAL_CHAIN:
+  - CronJob fan-out increased write pressure.
+  - WAL generation exceeded replica replay capacity.
+  - ReplicaLag accumulated and stale reads were served.
+

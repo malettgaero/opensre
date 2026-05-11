@@ -626,7 +626,7 @@ def run_synthetic_suite(config: SuiteRunConfig) -> SuiteRunResult:
 
     max_workers = min(config.parallel_levels, len(level_configs)) if level_configs else 1
     progress_context = progress if progress is not None else nullcontext()
-    suppress_investigation_rendering = bulk_run or config.output_json
+    suppress_investigation_rendering = bulk_run or config.output_json or (progress is not None)
     with (
         _suppress_investigation_rendering(suppress_investigation_rendering),
         progress_context,

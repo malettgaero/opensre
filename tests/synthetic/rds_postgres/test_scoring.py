@@ -88,6 +88,17 @@ def test_keyword_match_alias_lookup_causally_independent() -> None:
     assert mode == "alias_lookup"
 
 
+def test_keyword_match_alias_lookup_cronjob_from_cron_fanout_language() -> None:
+    """018-style narratives mention 'cron fan-out', not literal token 'cronjob'."""
+    from tests.synthetic.rds_postgres.scoring import _keyword_match_details
+
+    text = "billing reconciliation cron fan-out issuing high-rate wal-generating statements"
+    matched, mode, matched_alias = _keyword_match_details(text, "cronjob")
+    assert matched is True
+    assert mode == "alias_lookup"
+    assert matched_alias in {"cron fan-out", "cron"}
+
+
 def test_keyword_match_token_subset() -> None:
     from tests.synthetic.rds_postgres.scoring import _keyword_match_details
 

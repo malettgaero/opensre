@@ -175,6 +175,12 @@ def _keyword_match_details(normalized_output: str, keyword: str) -> tuple[bool, 
             "replicalag",
             "replication delay",
         ),
+        "cronjob": (
+            "cron job",
+            "cron fan-out",
+            "cron",
+            "scheduled reconciliation",
+        ),
         "causallyindependent": (
             "red herring",
             "not the root cause",

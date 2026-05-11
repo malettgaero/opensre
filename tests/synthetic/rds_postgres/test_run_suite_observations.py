@@ -268,10 +268,16 @@ def test_run_suite_bulk_execution_suppresses_investigation_rendering(
     assert os.environ.get("TRACER_OUTPUT_FORMAT") == "rich"
 
 
-def test_run_suite_single_scenario_keeps_investigation_rendering_mode(
+def test_run_suite_single_scenario_suppresses_investigation_when_progress_visible(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    """Suite runner shows Rich Progress alongside scenarios; mute nested Live trackers.
+
+    A single synthetic scenario still opens the level Progress widget. Rendering both
+    :class:`~rich.live.Live` (investigation) and :class:`~rich.progress.Progress` on
+    the same console duplicates/refreshes unrelated lines (`TRACER_OUTPUT_FORMAT=none`).
+    """
     fixture = load_scenario(SUITE_DIR / "001-replication-lag")
     output_formats_seen: list[str | None] = []
 
@@ -292,7 +298,7 @@ def test_run_suite_single_scenario_keeps_investigation_rendering_mode(
         ["--scenario", fixture.scenario_id, "--observations-dir", str(tmp_path)]
     )
 
-    assert output_formats_seen == [None]
+    assert output_formats_seen == ["none"]
 
 
 # ---------------------------------------------------------------------------
