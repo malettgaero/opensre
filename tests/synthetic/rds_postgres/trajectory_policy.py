@@ -3,17 +3,32 @@
 This module is intentionally free of rich/console dependencies so it can be
 imported and unit-tested without pulling in the full observation rendering stack.
 
-The three public symbols are re-exported from observations.py for backward
-compatibility with existing import sites.
+``TrajectoryMetrics`` lives here alongside policy types so
+``observations.py`` can import from this module without creating an import cycle.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from tests.synthetic.rds_postgres.observations import TrajectoryMetrics
+
+@dataclass(frozen=True)
+class TrajectoryMetrics:
+    """Numeric summary of how closely an executed trajectory matched expectations."""
+
+    flat_actions: list[str]
+    actions_per_loop: list[int]
+    strict_match: bool | None
+    lcs_ratio: float | None
+    edit_distance: int | None
+    coverage: float | None
+    extra_actions: list[str]
+    missing_actions: list[str]
+    redundancy_count: int
+    loops_used: int
+    max_loops: int | None
+    loop_calibration_ok: bool | None
+    failed_action_count: int
 
 
 @dataclass(frozen=True)

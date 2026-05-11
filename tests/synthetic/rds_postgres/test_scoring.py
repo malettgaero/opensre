@@ -18,7 +18,7 @@ def test_scoring_module_imports_without_app_pipeline() -> None:
     """scoring.py must be importable without touching app.pipeline."""
     # Force the import to happen in this test's process; if scoring.py was
     # already imported earlier that's fine — we just check the invariant holds.
-    import tests.synthetic.rds_postgres.scoring  # noqa: F401
+    from tests.synthetic.rds_postgres.scoring import score_result  # noqa: F401
 
     app_pipeline_modules = [k for k in sys.modules if k.startswith("app.pipeline")]
     assert app_pipeline_modules == [], (
@@ -69,6 +69,15 @@ def test_keyword_match_alias_lookup_replication_lag() -> None:
     assert alias == "replica lag"
 
 
+def test_keyword_match_alias_lookup_replicalag_token() -> None:
+    from tests.synthetic.rds_postgres.scoring import _keyword_match_details
+
+    matched, mode, alias = _keyword_match_details("replicalag increased sharply", "replication lag")
+    assert matched is True
+    assert mode == "alias_lookup"
+    assert alias == "replicalag"
+
+
 def test_keyword_match_alias_lookup_causally_independent() -> None:
     from tests.synthetic.rds_postgres.scoring import _keyword_match_details
 
@@ -101,9 +110,7 @@ def test_score_result_uses_semantic_keyword_matching_for_write_heavy_workload() 
     from tests.synthetic.rds_postgres.scoring import score_result
 
     fixtures = load_all_scenarios(SUITE_DIR)
-    write_heavy_fixture = next(
-        (f for f in fixtures if "write" in f.scenario_id.lower()), None
-    )
+    write_heavy_fixture = next((f for f in fixtures if "write" in f.scenario_id.lower()), None)
     if write_heavy_fixture is None:
         pytest.skip("no write-heavy fixture in current suite")
 

@@ -62,20 +62,12 @@ from tests.synthetic.rds_postgres.scenario_loader import (
 # Re-export scoring symbols so existing import sites continue to work without
 # modification. Track removal in a follow-up once all sites are migrated.
 from tests.synthetic.rds_postgres.scoring import (
-    _REQUIRED_GATE_NAMES,
     FailureDetail,
     GateResult,
     ReasoningScore,
     ScenarioScore,
     TrajectoryScore,
-    _accepted_root_cause_categories,
     _all_required_gates_pass,
-    _keyword_match_details,
-    _matches_required_keyword,
-    _matches_required_keyword_exact,
-    _normalize_query_token,
-    _normalize_text,
-    _scored_output_text,
     score_reasoning,
     score_result,
     score_trajectory,
@@ -678,7 +670,9 @@ def run_synthetic_suite(config: SuiteRunConfig) -> SuiteRunResult:
         should_report = False
 
     if should_report:
-        report_console = interactive_console if show_interactive else Console(highlight=False, soft_wrap=True)
+        report_console = (
+            interactive_console if show_interactive else Console(highlight=False, soft_wrap=True)
+        )
         for execution in ordered_executions:
             render_report_to_console(execution.observation_for_report, report_console)
 

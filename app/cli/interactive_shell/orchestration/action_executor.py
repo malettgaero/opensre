@@ -82,6 +82,19 @@ def read_diag(buf: tempfile.SpooledTemporaryFile[bytes]) -> str:  # type: ignore
     return buf.read(_SYNTHETIC_DIAG_CHARS).decode("utf-8", errors="replace").strip()
 
 
+# Width of the ``<task_id> <stream> │ `` prefix that ``_print_task_output_line``
+# prepends to every relayed subprocess line. Used to align the subprocess's own
+# Rich rendering width via ``COLUMNS`` so panels and tables don't wrap mid-row
+# in the user's narrower terminal once the prefix has been added.
+#   task_id (8 hex) + " " + stream ("stdout"/"stderr", 6) + " │ " (3) = 18
+_TASK_OUTPUT_PREFIX_WIDTH = 18
+
+# Below this many columns Rich panels and tables degrade past usefulness. We
+# keep the subprocess at this minimum even if the user's terminal is tiny —
+# wrapping the borders is no worse than crushing them.
+_MIN_SUBPROCESS_TERMINAL_WIDTH = 60
+
+
 def _print_task_output_line(
     console: Console,
     task: TaskRecord,
@@ -94,6 +107,36 @@ def _print_task_output_line(
     text.append(f"{task.task_id} {stream_name} │ ", style=DIM)
     text.append(line.rstrip("\r\n"), style=style)
     console.print(text)
+
+
+def _subprocess_env_with_aligned_width(console: Console) -> dict[str, str]:
+    """Return ``os.environ`` patched so a piped Rich subprocess wraps to fit.
+
+    Background: ``_print_task_output_line`` prepends ``<task_id> <stream> │ ``
+    (a fixed 18-char prefix) to every relayed subprocess line before printing
+    into the user's terminal. The subprocess itself sees a piped stdout, so
+    Rich inside the subprocess falls back to a default 80-column rendering.
+    The combined ``80 + 18 = 98`` chars then overflow narrower user terminals,
+    breaking Rich's panel borders and table headers mid-row.
+
+    We forward the user's actual terminal width minus the prefix overhead via
+    the ``COLUMNS`` env var (and ``LINES`` for completeness). Rich and most
+    POSIX tools honour ``COLUMNS`` via ``shutil.get_terminal_size``, so the
+    subprocess renders narrow enough that the relayed line fits inside the
+    user's terminal once the prefix is applied. A floor of 60 columns keeps
+    rendering usable when the user's terminal is unusually narrow.
+    """
+    user_width = console.size.width or _MIN_SUBPROCESS_TERMINAL_WIDTH + _TASK_OUTPUT_PREFIX_WIDTH
+    available = max(
+        _MIN_SUBPROCESS_TERMINAL_WIDTH,
+        user_width - _TASK_OUTPUT_PREFIX_WIDTH - 1,
+    )
+    env = dict(os.environ)
+    env["COLUMNS"] = str(available)
+    # LINES is less critical (Rich pagination is rare here) but we keep
+    # the pair consistent so ``shutil.get_terminal_size`` agrees with itself.
+    env.setdefault("LINES", str(max(20, console.size.height or 24)))
+    return env
 
 
 def _pump_task_stream(
@@ -218,6 +261,7 @@ def start_background_cli_task(
         stdout_buf = tempfile.SpooledTemporaryFile(  # type: ignore[type-arg] # noqa: SIM115
             max_size=_MAX_COMMAND_OUTPUT_CHARS
         )
+    subprocess_env = _subprocess_env_with_aligned_width(console)
     proc: subprocess.Popen[Any]
     try:
         if pty_fds is None:
@@ -229,6 +273,7 @@ def start_background_cli_task(
                 encoding="utf-8",
                 errors="replace",
                 start_new_session=True,
+                env=subprocess_env,
             )
         else:
             _master_fd, slave_fd = pty_fds
@@ -239,6 +284,7 @@ def start_background_cli_task(
                 stderr=slave_fd,
                 close_fds=True,
                 start_new_session=True,
+                env=subprocess_env,
             )
     except Exception as exc:  # noqa: BLE001
         if pty_fds is not None:
@@ -1102,6 +1148,7 @@ def run_synthetic_test(
             encoding="utf-8",
             errors="replace",
             start_new_session=True,
+            env=_subprocess_env_with_aligned_width(console),
         )
     except Exception as exc:
         stderr_buf.close()

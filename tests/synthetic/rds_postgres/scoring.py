@@ -172,6 +172,7 @@ def _keyword_match_details(normalized_output: str, keyword: str) -> tuple[bool, 
         ),
         "replicationlag": (
             "replica lag",
+            "replicalag",
             "replication delay",
         ),
         "causallyindependent": (

@@ -15,33 +15,18 @@ from rich.text import Text
 
 # Re-exported for backward compatibility — canonical definitions live in trajectory_policy.py
 from tests.synthetic.rds_postgres.trajectory_policy import (
+    TrajectoryMetrics,
     TrajectoryPolicy,
     TrajectoryPolicyResult,
     evaluate_trajectory_policy,
 )
 
 __all__ = [
+    "TrajectoryMetrics",
     "TrajectoryPolicy",
     "TrajectoryPolicyResult",
     "evaluate_trajectory_policy",
 ]
-
-
-@dataclass(frozen=True)
-class TrajectoryMetrics:
-    flat_actions: list[str]
-    actions_per_loop: list[int]
-    strict_match: bool | None
-    lcs_ratio: float | None
-    edit_distance: int | None
-    coverage: float | None
-    extra_actions: list[str]
-    missing_actions: list[str]
-    redundancy_count: int
-    loops_used: int
-    max_loops: int | None
-    loop_calibration_ok: bool | None
-    failed_action_count: int
 
 
 @dataclass(frozen=True)

@@ -15,8 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from tests.synthetic.rds_postgres.observations import RunObservation, write_observation
 
 
@@ -35,7 +33,7 @@ def _make_observation(tmp_path: Path, scenario_id: str = "000-test") -> RunObser
         },
         "trajectory": {"golden": [], "actual": [], "policy": None},
     }
-    from tests.synthetic.rds_postgres.observations import TrajectoryMetrics
+    from tests.synthetic.rds_postgres.trajectory_policy import TrajectoryMetrics
 
     return RunObservation(
         report_schema_version="report_v2",

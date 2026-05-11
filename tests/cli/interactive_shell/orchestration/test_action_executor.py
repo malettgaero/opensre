@@ -13,6 +13,8 @@ import pytest
 from rich.console import Console
 
 from app.cli.interactive_shell.orchestration.action_executor import (
+    _MIN_SUBPROCESS_TERMINAL_WIDTH,
+    _TASK_OUTPUT_PREFIX_WIDTH,
     read_diag,
     run_cd_command,
     run_claude_code_implementation,
@@ -676,3 +678,143 @@ def test_run_synthetic_test_honours_explicit_scenario(
 
     assert popen_commands[0][-2:] == ["--scenario", "005-failover"]
     assert "opensre tests synthetic --scenario 005-failover" in buf.getvalue()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Subprocess terminal width forwarding
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Regression: subprocess Rich output (synthetic suite panels and tables) used
+# to render at the default 80-column width because the subprocess's stdout is
+# a pipe. ``_print_task_output_line`` then prepended an 18-char ``<task_id>
+# <stream> │ `` prefix, producing 98-char lines that wrapped mid-row in the
+# user's narrower terminal — the visible symptom was broken table headers and
+# panel borders. We forward ``user_width - prefix - 1`` via ``COLUMNS`` so the
+# subprocess renders narrow enough that the relayed line fits intact.
+
+
+class _CapturedPopen:
+    returncode = 0
+    stdout = io.StringIO("")
+    stderr = io.StringIO("")
+
+    def poll(self) -> int:
+        return 0
+
+
+def _capture_popen_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[dict[str, object]]:
+    captured: list[dict[str, object]] = []
+
+    def _fake_popen(_command: list[str], **kwargs: object) -> _CapturedPopen:
+        captured.append(kwargs)
+        return _CapturedPopen()
+
+    monkeypatch.setattr(
+        "app.cli.interactive_shell.orchestration.action_executor.subprocess.Popen", _fake_popen
+    )
+    monkeypatch.setattr(
+        "app.cli.interactive_shell.orchestration.action_executor.threading.Thread",
+        _ImmediateThread,
+    )
+    return captured
+
+
+def _start_one_task(console: Console) -> None:
+    start_background_cli_task(
+        display_command="opensre tests synthetic --scenario 001-replication-lag",
+        argv_list=["opensre", "tests", "synthetic", "--scenario", "001-replication-lag"],
+        session=ReplSession(),
+        console=console,
+        kind=TaskKind.SYNTHETIC_TEST,
+    )
+
+
+def test_background_task_forwards_columns_minus_prefix_to_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Subprocess COLUMNS = user_width − task-output prefix − 1.
+
+    A 100-col user terminal must hand the subprocess ``100 − 18 − 1 = 81``
+    columns so its Rich rendering fits within the user's terminal once the
+    18-char ``<task_id> stdout │ `` prefix is prepended by the line pump.
+    """
+    captured = _capture_popen_kwargs(monkeypatch)
+    console = Console(file=io.StringIO(), force_terminal=False, width=100)
+
+    _start_one_task(console)
+
+    assert captured, "Popen must have been called"
+    env = captured[0].get("env")
+    assert isinstance(env, dict)
+    assert env.get("COLUMNS") == str(100 - _TASK_OUTPUT_PREFIX_WIDTH - 1)
+
+
+def test_background_task_floors_subprocess_columns_for_tiny_terminals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """COLUMNS must never go below ``_MIN_SUBPROCESS_TERMINAL_WIDTH``.
+
+    On absurdly narrow terminals (CI jobs, restricted SSH PTYs) the naive
+    ``width − prefix − 1`` calculation could fall below the point where Rich
+    panels render at all. We floor at 60 so borders remain drawable; visible
+    wrapping is better than a crushed rendering.
+    """
+    captured = _capture_popen_kwargs(monkeypatch)
+    console = Console(file=io.StringIO(), force_terminal=False, width=40)
+
+    _start_one_task(console)
+
+    env = captured[0].get("env")
+    assert isinstance(env, dict)
+    assert env.get("COLUMNS") == str(_MIN_SUBPROCESS_TERMINAL_WIDTH)
+
+
+def test_background_task_preserves_existing_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The forwarded env must inherit ``os.environ`` so the subprocess sees PATH etc.
+
+    We only inject COLUMNS/LINES; everything else (PATH, HOME, virtualenv,
+    auth tokens) must reach the synthetic suite unchanged.
+    """
+    monkeypatch.setenv("OPENSRE_TEST_MARKER", "preserved-value")
+    captured = _capture_popen_kwargs(monkeypatch)
+    console = Console(file=io.StringIO(), force_terminal=False, width=120)
+
+    _start_one_task(console)
+
+    env = captured[0].get("env")
+    assert isinstance(env, dict)
+    assert env.get("OPENSRE_TEST_MARKER") == "preserved-value"
+
+
+def test_run_synthetic_test_forwards_columns_to_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``run_synthetic_test`` opens its own Popen — it must also forward COLUMNS.
+
+    Regression: this code path bypasses ``start_background_cli_task`` and so
+    was missed by the first iteration of the width-forwarding fix. The
+    visible symptom was that the synthetic suite's Rich Panel and Table
+    output (the per-scenario "Synthetic RDS Run" panel, the "Synthetic
+    Suite Report" table, and the "Level Summary" table) rendered at the
+    pipe-default 80 columns and then wrapped mid-row in the user's terminal
+    once the 18-char ``<task_id> stdout │ `` prefix had been prepended.
+    """
+    captured = _capture_popen_kwargs(monkeypatch)
+    console = Console(file=io.StringIO(), force_terminal=False, width=110)
+
+    run_synthetic_test(
+        "rds_postgres:005-failover",
+        ReplSession(),
+        console,
+        confirm_fn=lambda _prompt: "y",
+        is_tty=True,
+    )
+
+    assert captured, "run_synthetic_test must spawn at least one subprocess"
+    env = captured[0].get("env")
+    assert isinstance(env, dict)
+    assert env.get("COLUMNS") == str(110 - _TASK_OUTPUT_PREFIX_WIDTH - 1)

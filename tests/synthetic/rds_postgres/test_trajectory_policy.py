@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from tests.synthetic.rds_postgres.trajectory_policy import (
+    TrajectoryMetrics,
     TrajectoryPolicy,
     TrajectoryPolicyResult,
     evaluate_trajectory_policy,
@@ -59,10 +60,7 @@ def _make_metrics(
     max_loops: int | None = 3,
 ) -> Any:
     """Return a minimal duck-typed TrajectoryMetrics substitute."""
-    from tests.synthetic.rds_postgres.observations import (
-        TrajectoryMetrics,
-        compute_trajectory_metrics,
-    )
+    from tests.synthetic.rds_postgres.observations import compute_trajectory_metrics
 
     golden = golden_actions or []
     actual = flat_actions or []
@@ -83,7 +81,9 @@ def _make_metrics(
         edit_distance=edit_distance if edit_distance is not None else computed.edit_distance,
         coverage=computed.coverage,
         extra_actions=extra_actions if extra_actions is not None else computed.extra_actions,
-        missing_actions=missing_actions if missing_actions is not None else computed.missing_actions,
+        missing_actions=missing_actions
+        if missing_actions is not None
+        else computed.missing_actions,
         redundancy_count=redundancy_count,
         loops_used=loops_used,
         max_loops=max_loops,
