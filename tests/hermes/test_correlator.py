@@ -248,3 +248,26 @@ class TestCorrelatingSink:
         sink(_incident(seconds=0))
         sink(_incident(seconds=5))  # escalates
         assert sink.metrics_snapshot()["escalated"] == 1
+
+    def test_escalated_incident_uses_distinct_fingerprint_key(self) -> None:
+        """Greptile P1: escalated incidents must reach the sink with an
+        ':escalated'-suffixed fingerprint so AlarmDispatcher's cooldown
+        does not suppress them under the first-occurrence bucket."""
+        delivered: list[HermesIncident] = []
+        corr = IncidentCorrelator(dedup_window_s=0, escalation_window_s=60, escalation_threshold=2)
+        sink = CorrelatingSink(
+            correlator=corr,
+            routes={
+                RouteDestination.TELEGRAM_WITH_RCA: delivered.append,
+                RouteDestination.PAGER: delivered.append,
+            },
+        )
+        sink(_incident(seconds=0))   # first occurrence — plain fingerprint
+        sink(_incident(seconds=5))   # escalates
+        assert len(delivered) == 2
+        fp_first = delivered[0].fingerprint
+        fp_escalated = delivered[1].fingerprint
+        assert not fp_first.endswith(":escalated"), "first occurrence must use plain fingerprint"
+        assert fp_escalated == f"{fp_first}:escalated", (
+            "escalated incident must use ':escalated'-suffixed fingerprint"
+        )

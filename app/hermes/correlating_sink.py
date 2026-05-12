@@ -89,8 +89,18 @@ class CorrelatingSink:
             self._count_unrouted(decision)
             return
         self._count_delivered(decision)
+        # Escalated incidents must use a distinct cooldown key so a downstream
+        # AlarmDispatcher does not silently suppress them under the same
+        # per-fingerprint cooldown window that already fired for the first
+        # occurrence. Appending ":escalated" keeps the key stable across
+        # repeated escalations for the same underlying event.
+        deliver = (
+            _with_escalated_fingerprint(decision.deliver)
+            if decision.escalated_from is not None
+            else decision.deliver
+        )
         try:
-            sink_fn(decision.deliver)
+            sink_fn(deliver)
         except Exception:  # noqa: BLE001 — sinks must never crash the agent
             logger.exception(
                 "downstream sink raised for incident rule=%s destination=%s",
@@ -138,3 +148,22 @@ class CorrelatingSink:
             destination.value,
             rule,
         )
+
+
+def _with_escalated_fingerprint(incident: HermesIncident) -> HermesIncident:
+    """Return a copy of *incident* whose fingerprint has an ':escalated' suffix.
+
+    This ensures downstream :class:`AlarmDispatcher` instances use a
+    distinct cooldown bucket for escalated notifications, preventing the
+    first-occurrence cooldown from silently suppressing the escalation alert.
+    """
+    return HermesIncident(
+        rule=incident.rule,
+        severity=incident.severity,
+        title=incident.title,
+        detected_at=incident.detected_at,
+        logger=incident.logger,
+        fingerprint=f"{incident.fingerprint}:escalated",
+        records=incident.records,
+        run_id=incident.run_id,
+    )
