@@ -24,6 +24,17 @@ Two modes:
     that appeared since. Rotation- and truncation-safe. This is the
     efficient mode for repeated polling — bandwidth is O(new lines)
     not O(file size).
+
+    **Known limitation — classifier state is not persisted between
+    calls.** Each invocation constructs a fresh
+    :class:`~app.hermes.classifier.IncidentClassifier`, so burst-window
+    counts and traceback-continuation state reset on every tool call.
+    Multi-call burst detection will therefore under-count incidents
+    whose constituent records span two separate ``tail`` invocations.
+    The production :class:`~app.hermes.agent.HermesAgent` avoids this by
+    keeping a single long-lived classifier; agents that need accurate
+    cross-poll burst detection should use the watch command instead of
+    repeated ``tail`` calls.
 """
 
 from __future__ import annotations
@@ -113,6 +124,19 @@ def _serialise_poll(
         records = poll.records[:max_records]
     truncated_in_response = len(poll.records) - len(records)
     incidents = poll.incidents[:max_incidents]
+
+    # In scan mode the seek-back heuristic may overshoot and yield more
+    # records than ``tail_lines``; the excess was already dropped above
+    # via ``keep_most_recent``. Setting ``has_more`` based solely on
+    # that overshoot would mislead the caller into an unnecessary
+    # follow-up tail call. Suppress it when we are in scan mode (i.e.
+    # ``keep_most_recent``) and the only driver is
+    # ``truncated_response_records`` from the overshoot.
+    if keep_most_recent:
+        has_more = poll.truncated_lines > 0 or poll.rotation_detected
+    else:
+        has_more = poll.truncated_lines > 0 or truncated_in_response > 0 or poll.rotation_detected
+
     return {
         "cursor": poll.cursor.to_token(),
         "rotation_detected": poll.rotation_detected,
@@ -125,9 +149,7 @@ def _serialise_poll(
         "parsed_line_count": poll.parsed_line_count,
         "records": [_serialise_record(r) for r in records],
         "incidents": [_serialise_incident(i) for i in incidents],
-        "has_more": (
-            poll.truncated_lines > 0 or truncated_in_response > 0 or poll.rotation_detected
-        ),
+        "has_more": has_more,
     }
 
 

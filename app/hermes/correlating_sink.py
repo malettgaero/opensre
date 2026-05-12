@@ -88,7 +88,6 @@ class CorrelatingSink:
             self._warn_missing_route(incident.rule, decision.destination)
             self._count_unrouted(decision)
             return
-        self._count_delivered(decision)
         # Escalated incidents must use a distinct cooldown key so a downstream
         # AlarmDispatcher does not silently suppress them under the same
         # per-fingerprint cooldown window that already fired for the first
@@ -101,6 +100,9 @@ class CorrelatingSink:
         )
         try:
             sink_fn(deliver)
+            # Count as delivered only after the sink call succeeds; a
+            # raising sink must not inflate the delivered counter.
+            self._count_delivered(decision)
         except Exception:  # noqa: BLE001 — sinks must never crash the agent
             logger.exception(
                 "downstream sink raised for incident rule=%s destination=%s",

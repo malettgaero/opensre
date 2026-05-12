@@ -193,14 +193,15 @@ class TelegramSink:
     def close(self) -> None:
         """Shut down the bridge executor.
 
-        Safe to call multiple times. The :class:`TelegramSink` itself
-        does not own any other resources, so callers wiring a sink into
-        a long-running process should invoke ``close()`` on shutdown
-        to drain any in-flight bridge calls.
+        Safe to call multiple times. Cancels any *pending* (not yet
+        started) futures immediately so the process exits promptly after
+        a SIGTERM. Bridge calls that are *already running* are left to
+        finish naturally — they are bounded by ``bridge_timeout_s`` so
+        the worst-case wait is that value, not indefinite.
         """
         executor = self._bridge_executor
         if executor is not None:
-            executor.shutdown(wait=True, cancel_futures=False)
+            executor.shutdown(wait=True, cancel_futures=True)
             self._bridge_executor = None
 
     # ------------------------------------------------------------------
