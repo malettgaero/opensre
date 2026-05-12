@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from app.hermes.incident import HermesIncident, IncidentSeverity, LogLevel, LogRecord
+from app.hermes.investigation import run_incident_investigation
 from app.hermes.sinks import TelegramSink, TelegramSinkConfig, make_telegram_sink
 from app.watch_dog.alarms import AlarmCredentials, AlarmDispatcher
 
@@ -196,6 +197,30 @@ class TestSeverityRouting:
         sink = TelegramSink(dispatcher, investigation_bridge=_bridge, config=_INLINE)
         # Must not raise — a broken investigation pipeline cannot block
         # notification delivery.
+        sink(_incident(severity=IncidentSeverity.HIGH))
+
+        assert len(calls) == 1
+        text = calls[0]["text"]
+        assert "investigation summary:" not in text
+        assert "investigation: attempted (failed" in text
+
+    def test_builtin_investigation_bridge_propagates_pipeline_errors(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``run_incident_investigation`` must not swallow ``run_investigation``
+        exceptions — the sink distinguishes failure from \"no summary\"."""
+
+        dispatcher, calls = _dispatcher(monkeypatch)
+
+        def _boom(**_kwargs: Any) -> Any:
+            raise RuntimeError("langgraph exploded")
+
+        monkeypatch.setattr("app.pipeline.runners.run_investigation", _boom)
+        sink = TelegramSink(
+            dispatcher,
+            investigation_bridge=run_incident_investigation,
+            config=_INLINE,
+        )
         sink(_incident(severity=IncidentSeverity.HIGH))
 
         assert len(calls) == 1

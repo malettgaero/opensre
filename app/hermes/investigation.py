@@ -12,12 +12,9 @@ the bridge pay no import cost.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from app.hermes.incident import HermesIncident, LogRecord
-
-logger = logging.getLogger(__name__)
 
 # Trim long evidence blobs so the alert annotations stay well under any
 # downstream payload limit (Grafana webhook bodies, LLM prompts, etc.).
@@ -66,10 +63,12 @@ def build_alert_from_incident(incident: HermesIncident) -> dict[str, Any]:
 def run_incident_investigation(incident: HermesIncident) -> str | None:
     """Invoke the OpenSRE investigation pipeline for ``incident``.
 
-    Returns the resulting summary string, or ``None`` if the pipeline
-    produced no usable output. Heavy imports are deferred so the Hermes
-    sink can be imported in environments where LangGraph and friends
-    aren't installed (e.g. unit tests).
+    Returns the resulting summary string, or ``None`` if the pipeline ran
+    successfully but produced no usable output. If :func:`run_investigation`
+    raises, the exception propagates to the caller — :class:`TelegramSink`
+    maps that to an operator-visible "attempted (failed)" marker. Heavy
+    imports are deferred so the Hermes sink can be imported in environments
+    where LangGraph and friends are not installed (e.g. unit tests).
     """
     # Imported lazily — pulling app.pipeline.runners at module import
     # time would force every Hermes consumer to pay the LangGraph import
@@ -77,20 +76,12 @@ def run_incident_investigation(incident: HermesIncident) -> str | None:
     from app.pipeline.runners import run_investigation
 
     alert = build_alert_from_incident(incident)
-    try:
-        state = run_investigation(
-            alert_name=str(alert["alert_name"]),
-            pipeline_name=str(alert["pipeline_name"]),
-            severity=str(alert["severity"]),
-            raw_alert=alert,
-        )
-    except Exception:
-        logger.exception(
-            "hermes investigation failed: rule=%s fingerprint=%s",
-            incident.rule,
-            incident.fingerprint,
-        )
-        return None
+    state = run_investigation(
+        alert_name=str(alert["alert_name"]),
+        pipeline_name=str(alert["pipeline_name"]),
+        severity=str(alert["severity"]),
+        raw_alert=alert,
+    )
     return _extract_summary(state)
 
 
