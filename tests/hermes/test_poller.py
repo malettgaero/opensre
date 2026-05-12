@@ -185,6 +185,36 @@ class TestMaxLines:
             assert len(second.records) == 3
             assert second.truncated_lines == 0
 
+    def test_max_lines_boundary_line_not_double_classified_across_polls(
+        self, tmp_path: Path
+    ) -> None:
+        """The line deferred by max_lines must not be classifier.observe'd before
+        rewind — a fresh classifier on the next poll would emit duplicate incidents."""
+        p = tmp_path / "errs.log"
+        p.write_text(
+            "2026-05-12 00:00:00,000 ERROR a: one\n"
+            "2026-05-12 00:00:01,000 ERROR b: two\n"
+            "2026-05-12 00:00:02,000 ERROR c: three\n",
+            encoding="utf-8",
+        )
+        first = hermes_poller.poll_hermes_logs(
+            p,
+            hermes_poller.HermesLogCursor.at_start(p),
+            max_lines=2,
+            classifier=IncidentClassifier(),
+        )
+        assert len(first.records) == 2
+        second = hermes_poller.poll_hermes_logs(
+            p,
+            first.cursor,
+            max_lines=10,
+            classifier=IncidentClassifier(),
+        )
+        assert len(second.records) == 1
+        err_incidents = [i for i in first.incidents + second.incidents if i.rule == "error_severity"]
+        assert len(err_incidents) == 3
+        assert len({i.fingerprint for i in err_incidents}) == 3
+
 
 class TestMissingFile:
     def test_missing_file_returns_empty_at_start_cursor(self, tmp_path: Path) -> None:

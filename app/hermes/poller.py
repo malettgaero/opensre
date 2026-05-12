@@ -338,29 +338,20 @@ def _read_segment(
             new_offset = handle.tell()
             if record is None:
                 continue
-            parsed_count += 1
-            if not record.is_continuation:
-                prev_level = record.level
 
-            # Classifier always observes the record so traceback
-            # buffering / warning-burst windows are correct.
-            for incident in classifier.observe(record):
-                incidents.append(incident)
-
-            if level_filter is not None and record.level not in level_filter:
-                continue
-            if since is not None and record.timestamp < since and not record.is_continuation:
-                continue
-            if max_lines is not None and len(records) >= max_lines:
-                # Cap reached: rewind before this line so the cursor
-                # retries it on the next poll instead of silently
-                # dropping it. Estimate backlog lines from remaining file
-                # bytes vs average bytes per *returned* record over the span
-                # we actually read (start_offset → line_start). Do not use
-                # (EOF - start_offset) / parsed_count — that mixes the whole
-                # tail with only pre-cap parses and skews the average.
-                # Stat the open handle so a path-level stat() cannot observe a
-                # different inode after rotation while we're still reading.
+            passes_level = level_filter is None or record.level in level_filter
+            passes_since = not (
+                since is not None
+                and record.timestamp < since
+                and not record.is_continuation
+            )
+            would_return = passes_level and passes_since
+            # If this line would become the (max_lines+1)th returned record,
+            # rewind before it without calling observe(). The cursor must
+            # retry the same bytes on the next poll; observing here first
+            # would duplicate classifier incidents when the next poll uses a
+            # fresh classifier (e.g. get_hermes_logs per call).
+            if max_lines is not None and len(records) >= max_lines and would_return:
                 try:
                     file_size = os.fstat(handle.fileno()).st_size
                 except OSError:
@@ -375,6 +366,20 @@ def _read_segment(
                 new_offset = line_start
                 handle.seek(line_start)
                 break
+
+            parsed_count += 1
+            if not record.is_continuation:
+                prev_level = record.level
+
+            # Classifier always observes the record so traceback
+            # buffering / warning-burst windows are correct.
+            for incident in classifier.observe(record):
+                incidents.append(incident)
+
+            if level_filter is not None and record.level not in level_filter:
+                continue
+            if since is not None and record.timestamp < since and not record.is_continuation:
+                continue
             records.append(record)
 
     return tuple(records), tuple(incidents), new_offset, parsed_count, truncated
