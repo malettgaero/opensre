@@ -33,6 +33,7 @@ from datetime import datetime, timedelta
 from typing import Final
 
 from app.hermes.incident import HermesIncident, IncidentSeverity, LogLevel, LogRecord
+from app.hermes.rules import PatternRule, RepeatRule, default_pattern_rules
 
 DEFAULT_WARNING_BURST_THRESHOLD: Final[int] = 5
 DEFAULT_WARNING_BURST_WINDOW_S: Final[float] = 60.0
@@ -58,6 +59,7 @@ class IncidentClassifier:
         "_warning_buckets",
         "_open_tracebacks",
         "_lock",
+        "_pattern_rules",
     )
 
     def __init__(
@@ -66,6 +68,8 @@ class IncidentClassifier:
         warning_burst_threshold: int = DEFAULT_WARNING_BURST_THRESHOLD,
         warning_burst_window_s: float = DEFAULT_WARNING_BURST_WINDOW_S,
         traceback_followup_s: float = DEFAULT_TRACEBACK_FOLLOWUP_S,
+        pattern_rules: list[PatternRule | RepeatRule] | None = None,
+        use_default_pattern_rules: bool = True,
     ) -> None:
         if warning_burst_threshold < 2:
             raise ValueError("warning_burst_threshold must be >= 2")
@@ -80,6 +84,12 @@ class IncidentClassifier:
         self._warning_buckets: dict[str, deque[LogRecord]] = {}
         self._open_tracebacks: dict[str, _OpenTraceback] = {}
         self._lock = threading.Lock()
+        rules: list[PatternRule | RepeatRule] = []
+        if use_default_pattern_rules:
+            rules.extend(default_pattern_rules())
+        if pattern_rules:
+            rules.extend(pattern_rules)
+        self._pattern_rules = rules
 
     def observe(self, record: LogRecord) -> list[HermesIncident]:
         """Feed a single record; return any incidents triggered by it.
@@ -107,6 +117,11 @@ class IncidentClassifier:
             burst_incident = self._maybe_emit_warning_burst(record)
             if burst_incident is not None:
                 incidents.append(burst_incident)
+
+            for rule in self._pattern_rules:
+                pattern_incident = rule.evaluate(record)
+                if pattern_incident is not None:
+                    incidents.append(pattern_incident)
 
         return incidents
 

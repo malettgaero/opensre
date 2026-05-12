@@ -209,12 +209,19 @@ def test_e2e_002_gateway_systemd_crash_loop(
     )
 
     # All four CRITICAL exit lines share the same logger+message text so
-    # their fingerprints collapse — the cooldown should produce exactly
-    # one Telegram send for the crash-loop pattern.
+    # their `error_severity` fingerprints collapse via cooldown to one
+    # send. The new `crash_loop` repeat-rule additionally fires once on
+    # the same lines, producing a second (distinct) incident type. So we
+    # expect exactly **two** Telegram sends mentioning the exit text:
+    # one `error_severity` and one `crash_loop`.
     crashloop_calls = [c for c in calls if "Gateway process exited" in c["text"]]
-    assert len(crashloop_calls) == 1, (
-        "fingerprint-based cooldown should collapse identical crash-loop "
-        f"exits into a single Telegram send; got {len(crashloop_calls)}"
+    assert len(crashloop_calls) == 2, (
+        "expected one error_severity (cooldown-collapsed) plus one crash_loop "
+        f"incident for the crash-loop exits; got {len(crashloop_calls)}"
+    )
+    incident_rules = {i.rule for i in incidents}
+    assert "crash_loop" in incident_rules, (
+        f"crash_loop repeat-rule should have fired; rules={incident_rules}"
     )
 
     # The traceback Telegram alert must carry the actionable
