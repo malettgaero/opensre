@@ -16,6 +16,7 @@ from app.cli.commands.general import (
     version_command,
 )
 from app.cli.commands.guardrails import guardrails
+from app.cli.commands.hermes import hermes_command
 from app.cli.commands.integrations import integrations
 from app.cli.commands.onboard import onboard
 from app.cli.commands.remote import remote
@@ -31,6 +32,7 @@ _COMMANDS: tuple[click.Command, ...] = (
     integrations,
     guardrails,
     agents,
+    hermes_command,
     health_command,
     doctor_command,
     update_command,

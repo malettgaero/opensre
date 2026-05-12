@@ -18,7 +18,17 @@ from app.hermes.classifier import (
     classify_all,
 )
 from app.hermes.incident import HermesIncident, IncidentSeverity, LogLevel, LogRecord
+from app.hermes.investigation import (
+    build_alert_from_incident,
+    run_incident_investigation,
+)
 from app.hermes.parser import parse_log_line
+from app.hermes.sinks import (
+    InvestigationBridge,
+    TelegramSink,
+    TelegramSinkConfig,
+    make_telegram_sink,
+)
 from app.hermes.tailer import FileTailer
 
 __all__ = [
@@ -32,8 +42,14 @@ __all__ = [
     "IncidentClassifier",
     "IncidentSeverity",
     "IncidentSink",
+    "InvestigationBridge",
     "LogLevel",
     "LogRecord",
+    "TelegramSink",
+    "TelegramSinkConfig",
+    "build_alert_from_incident",
     "classify_all",
+    "make_telegram_sink",
     "parse_log_line",
+    "run_incident_investigation",
 ]
