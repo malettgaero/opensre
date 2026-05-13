@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from app.integrations.llm_cli.errors import CLITemporaryFailure
 from app.integrations.llm_cli.kimi import KimiAdapter
+from app.integrations.llm_cli.runner import CLIBackedLLMClient
 
 
 def _version_proc() -> MagicMock:
@@ -250,8 +254,6 @@ def test_parse_and_explain_failure() -> None:
     # Test parse
     assert adapter.parse(stdout="  hello world  \n", stderr="", returncode=0) == "hello world"
 
-    import pytest
-
     with pytest.raises(RuntimeError, match="empty output"):
         adapter.parse(stdout="  ", stderr="", returncode=0)
 
@@ -273,16 +275,7 @@ def test_parse_and_explain_failure() -> None:
     assert fail_empty == "kimi returned no output"
 
 
-@patch("app.integrations.llm_cli.runner.subprocess.run")
-def test_cli_backed_client_raises_cli_temporary_failure_on_exit_code_75(
-    mock_run: MagicMock,
-) -> None:
-    """Exit code 75 (EX_TEMPFAIL) must raise CLITemporaryFailure, not plain RuntimeError."""
-    import pytest
-
-    from app.integrations.llm_cli.errors import CLITemporaryFailure
-    from app.integrations.llm_cli.runner import CLIBackedLLMClient
-
+def _make_temp_failure_adapter(session_id: str) -> MagicMock:
     mock_adapter = MagicMock(spec=KimiAdapter)
     mock_adapter.name = "kimi"
     mock_adapter.auth_hint = "Run: kimi login"
@@ -301,13 +294,45 @@ def test_cli_backed_client_raises_cli_temporary_failure_on_exit_code_75(
         env=None,
         timeout_sec=300.0,
     )
-    session_id = "79229edd-9caf-45af-bb89-04d3f742d063"
     mock_adapter.explain_failure.return_value = (
         f"kimi exited with code 75. To resume this session: kimi -r {session_id}"
     )
+    return mock_adapter
+
+
+@patch("app.integrations.llm_cli.runner.subprocess.run")
+def test_cli_backed_client_raises_cli_temporary_failure_on_exit_code_75(
+    mock_run: MagicMock,
+) -> None:
+    """Exit code 75 (EX_TEMPFAIL) must raise CLITemporaryFailure, not plain RuntimeError."""
+    session_id = "79229edd-9caf-45af-bb89-04d3f742d063"
+    mock_adapter = _make_temp_failure_adapter(session_id)
+    # explain_failure returns plain text (no "resume" phrase) so only the exit-code branch fires.
+    mock_adapter.explain_failure.return_value = "kimi exited with code 75."
+
+    mock_run.return_value = MagicMock(returncode=75, stdout="", stderr="")
+
+    with patch("app.guardrails.engine.get_guardrail_engine") as gr:
+        gr.return_value.is_active = False
+        client = CLIBackedLLMClient(mock_adapter, model="kimi-k2.5", max_tokens=256)
+        with pytest.raises(CLITemporaryFailure, match="kimi exited with code 75"):
+            client.invoke("hello")
+
+
+@patch("app.integrations.llm_cli.runner.subprocess.run")
+def test_cli_backed_client_raises_cli_temporary_failure_on_resume_session_message(
+    mock_run: MagicMock,
+) -> None:
+    """'resume this session' in explain_failure output triggers CLITemporaryFailure regardless of exit code."""
+    session_id = "79229edd-9caf-45af-bb89-04d3f742d063"
+    mock_adapter = _make_temp_failure_adapter(session_id)
+    # Non-75 exit code so only the string-match branch fires.
+    mock_adapter.explain_failure.return_value = (
+        f"kimi exited with code 1. To resume this session: kimi -r {session_id}"
+    )
 
     mock_run.return_value = MagicMock(
-        returncode=75,
+        returncode=1,
         stdout=f"To resume this session: kimi -r {session_id}",
         stderr="",
     )
@@ -315,5 +340,5 @@ def test_cli_backed_client_raises_cli_temporary_failure_on_exit_code_75(
     with patch("app.guardrails.engine.get_guardrail_engine") as gr:
         gr.return_value.is_active = False
         client = CLIBackedLLMClient(mock_adapter, model="kimi-k2.5", max_tokens=256)
-        with pytest.raises(CLITemporaryFailure, match="kimi exited with code 75"):
+        with pytest.raises(CLITemporaryFailure, match="resume this session"):
             client.invoke("hello")
