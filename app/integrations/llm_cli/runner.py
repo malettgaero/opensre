@@ -147,6 +147,10 @@ class CLIBackedLLMClient:
             base = self._adapter.explain_failure(
                 stdout=out, stderr=err, returncode=proc.returncode
             ).strip()
+            # EX_TEMPFAIL (75) is transient; raise before the auth heuristic and
+            # before the auth_probe_unclear augmentation so the message stays clean.
+            if proc.returncode == 75:
+                raise CLITransientError(base)
             # When the failure message signals an auth problem raise
             # CLIAuthenticationRequired so callers (reraise_cli_runtime_error,
             # server endpoints) get structured, actionable handling instead of
@@ -177,9 +181,6 @@ class CLIBackedLLMClient:
                 )
             else:
                 message = base
-            # EX_TEMPFAIL (75) — transient; not a code bug, don't send to Sentry.
-            if proc.returncode == 75:
-                raise CLITransientError(message)
             raise RuntimeError(message)
 
         content = self._adapter.parse(stdout=out, stderr=err, returncode=proc.returncode)

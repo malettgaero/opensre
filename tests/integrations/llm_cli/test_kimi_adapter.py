@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from app.integrations.llm_cli.errors import CLITransientError
 from app.integrations.llm_cli.kimi import KimiAdapter
+from app.integrations.llm_cli.runner import CLIBackedLLMClient
 
 
 def _version_proc() -> MagicMock:
@@ -251,12 +255,6 @@ def test_invoke_exit_code_75_raises_cli_transient_error(mock_run: MagicMock) -> 
     Sentry ignores CLITransientError so transient kimi failures don't create
     spurious bug reports (cf. GitHub issues #1866 / #1867).
     """
-    import pytest
-
-    from app.integrations.llm_cli.errors import CLITransientError
-    from app.integrations.llm_cli.kimi import KimiAdapter
-    from app.integrations.llm_cli.runner import CLIBackedLLMClient
-
     mock_adapter = MagicMock(spec=KimiAdapter)
     mock_adapter.name = "kimi"
     mock_adapter.auth_hint = "Run: kimi login"
