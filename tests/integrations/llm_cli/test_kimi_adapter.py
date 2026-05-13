@@ -271,3 +271,36 @@ def test_parse_and_explain_failure() -> None:
     # Test explain_failure: empty output with code 0
     fail_empty = adapter.explain_failure(stdout="", stderr="", returncode=0)
     assert fail_empty == "kimi returned no output"
+
+
+@patch("app.integrations.llm_cli.runner.subprocess.run")
+def test_cli_backed_client_exit_75_raises_cli_timeout_error(mock_run: MagicMock) -> None:
+    """Exit code 75 (EX_TEMPFAIL) must raise CLITimeoutError, not RuntimeError.
+
+    Sentry ignores CLITimeoutError so transient kimi failures do not create
+    spurious bug reports.
+    """
+    import pytest
+
+    from app.integrations.llm_cli.kimi import KimiAdapter
+    from app.integrations.llm_cli.runner import CLIBackedLLMClient, CLITimeoutError
+
+    mock_adapter = MagicMock(spec=KimiAdapter)
+    mock_adapter.name = "kimi"
+    mock_adapter.detect.return_value = MagicMock(
+        installed=True, bin_path="/usr/bin/kimi", logged_in=True, detail="ok"
+    )
+    mock_adapter.build.return_value = MagicMock(
+        argv=["/usr/bin/kimi", "--print", "--yolo"],
+        stdin="hello",
+        cwd="/tmp",
+        env=None,
+        timeout_sec=30.0,
+    )
+    mock_run.return_value = MagicMock(returncode=75, stdout="", stderr="rate limit")
+
+    with patch("app.guardrails.engine.get_guardrail_engine") as gr:
+        gr.return_value.is_active = False
+        client = CLIBackedLLMClient(mock_adapter, model="kimi-k2.5", max_tokens=256)
+        with pytest.raises(CLITimeoutError, match="exit 75"):
+            client.invoke("hello")
