@@ -147,6 +147,11 @@ class CLIBackedLLMClient:
             base = self._adapter.explain_failure(
                 stdout=out, stderr=err, returncode=proc.returncode
             ).strip()
+            # EX_TEMPFAIL (75) is a transient, retryable failure — handle it
+            # before the auth-keyword heuristic so a 75 exit whose explain_failure
+            # text happens to mention auth doesn't get misclassified.
+            if proc.returncode == 75:
+                raise CLITemporaryError(base)
             # When the failure message signals an auth problem raise
             # CLIAuthenticationRequired so callers (reraise_cli_runtime_error,
             # server endpoints) get structured, actionable handling instead of
@@ -177,8 +182,6 @@ class CLIBackedLLMClient:
                 )
             else:
                 message = base
-            if proc.returncode == 75:  # EX_TEMPFAIL: transient, not a code bug
-                raise CLITemporaryError(message)
             raise RuntimeError(message)
 
         content = self._adapter.parse(stdout=out, stderr=err, returncode=proc.returncode)
