@@ -667,6 +667,14 @@ def test_before_send_filters_nested_lists_of_dicts() -> None:
             "RuntimeError",
             "Cannot connect to Openrouter API. Check your network connection and that the endpoint URL is reachable.",
         ),
+        (
+            "RuntimeError",
+            "Anthropic request rejected (HTTP 400): Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-06-01 at 00:00 UTC.'}, 'request_id': 'req_011CaxxMA8NCSdDvaM2LaRm6'}",
+        ),
+        (
+            "RuntimeError",
+            "kimi exited with code 75. To resume this session: kimi -r 79229edd-9caf-45af-bb89-04d3f742d063",
+        ),
     ],
 )
 def test_before_send_drops_operator_actionable_llm_errors(

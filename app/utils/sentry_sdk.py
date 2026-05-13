@@ -59,6 +59,10 @@ _OPERATOR_ACTIONABLE_LLM_ERROR_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bLLM API request failed after multiple retries\b", re.I),
     # Provider endpoint unreachable (Ollama down, bad URL, SSL misconfiguration).
     re.compile(r"\bcannot connect to .+ api\b", re.I),
+    # Anthropic hard quota: "You have reached your specified API usage limits."
+    re.compile(r"\bapi usage limits\b", re.I),
+    # kimi session interrupted mid-run (exit 75); not a code bug, nothing to fix in Sentry.
+    re.compile(r"\bto resume this session\b", re.I),
 )
 
 
