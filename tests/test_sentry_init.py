@@ -654,3 +654,49 @@ def test_apply_scope_tags_is_first_wins(monkeypatch) -> None:
         call.args[1] for call in tag_mock.call_args_list if call.args[0] == "entrypoint"
     ]
     assert entrypoint_tags == ["webapp"]
+
+
+@pytest.mark.parametrize(
+    ("exc_type", "exc_value"),
+    [
+        (
+            "RuntimeError",
+            "Anthropic request rejected (HTTP 400): Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'You have reached your specified API usage limits. You will regain access on 2026-06-01 at 00:00 UTC.'}, 'request_id': 'req_011CaxxMA8NCSdDvaM2LaRm6'}",
+        ),
+        (
+            "BadRequestError",
+            "Your credit balance is too low to access the Anthropic API.",
+        ),
+        (
+            "RuntimeError",
+            "Anthropic authentication failed. Check ANTHROPIC_API_KEY in your environment or .env.",
+        ),
+        (
+            "RuntimeError",
+            "Anthropic model 'claude-opus-4-7' was not found. Check your configured model name and try again.",
+        ),
+        (
+            "RuntimeError",
+            "LLM API request failed after multiple retries. Try again in a few seconds.",
+        ),
+        (
+            "RuntimeError",
+            "Cannot connect to Ollama API. Check your network connection and that the endpoint URL is reachable.",
+        ),
+    ],
+)
+def test_before_send_drops_operator_actionable_llm_errors(
+    exc_type: str,
+    exc_value: str,
+) -> None:
+    event = {"exception": {"values": [{"type": exc_type, "value": exc_value}]}}
+
+    assert sentry_mod._before_send(event, {}) is None
+
+
+def test_before_send_keeps_non_llm_runtime_errors() -> None:
+    event = {
+        "exception": {"values": [{"type": "RuntimeError", "value": "database invariant broke"}]}
+    }
+
+    assert sentry_mod._before_send(event, {}) == event
