@@ -981,6 +981,18 @@ async def _run_interactive(
             nonlocal spinner_committed, last_bytes
             if spinner_committed or not spinner.streaming:
                 return
+            if spinner.bytes_in > 0:
+                # Once stream bytes start arriving, ``stream_to_console`` owns
+                # terminal output. Avoid any further cursor movement here:
+                # this polling loop may run after Rich has printed response
+                # lines, and ``\r\x1b[2K`` would clear whatever line the cursor
+                # is currently on. ``stream_to_console`` calls
+                # ``wipe_stdout_wait_spinner_line`` before its first print, so
+                # the wait line is still removed without this writer touching
+                # stdout again.
+                spinner_committed = True
+                last_bytes = spinner.bytes_in
+                return
             frame = spinner.inline_spinner_ansi(wait_metrics=False)
             if last_bytes == -1:
                 # First write — no prior line to overwrite.
@@ -988,13 +1000,10 @@ async def _run_interactive(
             else:
                 # Overwrite the previous spinner frame in-place.
                 sys.stdout.write(f"\r\x1b[2K{frame}")
-            if commit or spinner.bytes_in > 0:
-                # Lock the wait indicator: erase it entirely — it must not
-                # remain as "⠏ analysing…" in history once the reply renders.
-                if spinner.bytes_in > 0:
-                    sys.stdout.write("\r\x1b[2K")
-                else:
-                    sys.stdout.write("\r\x1b[2K\n")
+            if commit:
+                # Confirmation/cancellation paths need a clean line break
+                # before control returns to prompt_toolkit.
+                sys.stdout.write("\r\x1b[2K\n")
                 spinner_committed = True
             sys.stdout.flush()
             last_bytes = spinner.bytes_in
