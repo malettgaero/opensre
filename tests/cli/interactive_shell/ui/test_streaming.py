@@ -125,6 +125,27 @@ class TestTtyParagraphRender:
         )
         assert len(wipe_calls) == 1
 
+    def test_suppressed_path_updates_streaming_progress(self) -> None:
+        buf = io.StringIO()
+        progress_calls: list[int] = []
+
+        class ConsoleWithProgress(Console):
+            def update_streaming_progress(self, bytes_received: int) -> None:
+                progress_calls.append(bytes_received)
+
+        console = ConsoleWithProgress(
+            file=buf, force_terminal=True, color_system=None, width=80, highlight=False
+        )
+        result = stream_to_console(
+            console,
+            label="assistant",
+            chunks=_yield_chunks(['{"actions"', ':["a"]}']),
+            suppress_if_starts_with="{",
+        )
+
+        assert result == '{"actions":["a"]}'
+        assert progress_calls and progress_calls[-1] == len(result)
+
     def test_footer_uses_repl_turn_elapsed_when_hook_present(self) -> None:
         buf = io.StringIO()
 

@@ -954,6 +954,8 @@ async def _run_interactive(
             except asyncio.CancelledError:
                 return
             if state.exit_requested:
+                if not turn_done.done():
+                    turn_done.set_result(None)
                 state.queue.task_done()
                 return
             state.current_task = asyncio.create_task(_run_one_dispatch(text))

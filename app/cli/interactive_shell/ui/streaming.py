@@ -164,6 +164,15 @@ def stream_to_console(
                     if rest is None:
                         break
                     drained.append(rest)
+                update_progress = getattr(console, "update_streaming_progress", None)
+                if callable(update_progress):
+                    try:
+                        update_progress(
+                            sum(len(chunk_part) for chunk_part in peeked)
+                            + sum(len(chunk_part) for chunk_part in drained)
+                        )
+                    except Exception:
+                        pass
                 _maybe_wipe_stdout_wait(console)
                 return "".join(peeked) + "".join(drained)
             break
