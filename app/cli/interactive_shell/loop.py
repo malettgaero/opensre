@@ -8,10 +8,12 @@ to see prior turns), and a dynamic ``bottom_toolbar`` shows the live
 ``thinking… (Ns · ↓ X tokens) — esc to interrupt`` indicator while a
 turn is generating.
 
-Type-ahead during streaming works because the dispatch runs as an
-``asyncio`` background task; the next iteration's ``prompt_async``
-starts immediately, so the input frame stays editable while output
-continues to flow above it.
+While a user turn is still running (the queue hand-off window or an
+active dispatch worker), the refreshed ``prompt_async`` keeps the input
+surface **read-only** and hides the free-form placeholder — we still rely
+on a background processor so ``Esc``/stream cancel keeps working inside
+prompt-toolkit without blocking the main coroutine on an explicit
+``await`` of the turn alone.
 
 An earlier prototype used a textual-based persistent app with an inline
 ``RichLog``. That fought with macOS Terminal.app's native scroll
@@ -518,7 +520,7 @@ class _ReplState:
     so callers don't have to re-derive it from the raw fields.
     """
 
-    queue: asyncio.Queue[str] = field(default_factory=asyncio.Queue)
+    queue: asyncio.Queue[tuple[str, asyncio.Future[None]]] = field(default_factory=asyncio.Queue)
     current_task: asyncio.Task[None] | None = None
     # The currently-active dispatch's cancel event. Each turn allocates
     # a fresh ``threading.Event`` inside :func:`_run_one_dispatch` and
@@ -731,16 +733,11 @@ async def _run_interactive(
     inbox: _alert_inbox.AlertInbox | None = None,
 ) -> None:
     """Per-turn ``prompt_async`` cycle backed by a queue + background
-    processor. Submitting a new prompt while a turn is streaming
-    **enqueues** it — the active turn finishes naturally and the queued
-    item runs next (matches Claude Code's behaviour). ``Esc`` cancels
-    just the currently-running dispatch; the processor moves on to the
-    next queued item.
-
-    Type-ahead during streaming works because ``prompt_async`` keeps
-    running on the main coroutine while the processor drains the queue
-    in the background — the user can type and queue further prompts
-    without waiting for the active turn to complete.
+    processor. While a conversational turn executes, the redrawn prompt
+    frame is held read-only and the free-form placeholder is hidden —
+    Esc still cancels cooperative streams because dispatch runs in a
+    sibling asyncio task driven by prompt-toolkit, not blocked on bare
+    ``await`` ``Future`` completions on the main coroutine.
 
     ``hot_reloader`` (from main, optional) is consulted at the start of
     each prompt iteration so dev-time edits to dispatch handlers are
@@ -881,7 +878,7 @@ async def _run_interactive(
         """Drain queued prompts one dispatch at a time."""
         while not state.exit_requested:
             try:
-                text = await state.queue.get()
+                text, turn_done = await state.queue.get()
             except asyncio.CancelledError:
                 return
             if state.exit_requested:
@@ -900,22 +897,122 @@ async def _run_interactive(
                 # Swallow here so the queue keeps draining the next item.
                 pass
             state.current_task = None
+            if not turn_done.done():
+                turn_done.set_result(None)
             state.queue.task_done()
+
+    def _busy_turn_first_message_line() -> str:
+        animate = spinner.inline_spinner_ansi()
+        if animate:
+            return animate
+        return f"{ANSI_DIM}… — Ctrl+C to cancel{ANSI_RESET}"
+
+    def _busy_rule_ansi() -> str:
+        """Dim (non-accent) horizontal rule used while a turn is running.
+
+        Using the accent colour (bold green) for the rule during a busy
+        turn made it look identical to a fresh ready-prompt, misleading
+        the user into thinking input was open. Dim gray signals "sealed".
+        """
+        try:
+            width = get_app_or_none().output.get_size().columns  # type: ignore[union-attr]
+        except Exception:
+            width = 80
+        rule = _prompt_surface._PROMPT_RULE_CHAR * max(width, 1)
+        return f"{ANSI_DIM}{rule}{ANSI_RESET}"
 
     def _message_with_spinner() -> ANSI:
         """Prompt message — spinner row above the top rule + ``❯`` prefix.
 
-        The spinner row is *always* reserved: when streaming, the row
-        shows ``⠋ thinking… (Ns · ↓ X tokens)``; when idle, it's a blank
-        line. Reserving the row unconditionally is what keeps the
-        input cursor from jumping up by one line when streaming starts
-        and back down when it stops — Vaibhav's "still some jumping"
-        was that vertical shift. Re-evaluated every
-        ``refresh_interval`` tick so the spinner animates in place
-        without redrawing the rule below it.
+        The spinner row is *always* reserved: when streaming it shows
+        ``⠋ thinking… (Ns · ↓ X tokens)``; when idle it is a blank line.
+        Reserving the row unconditionally keeps the cursor from jumping a
+        line when streaming starts or stops.
         """
         base = _prompt_message(session).value
         return ANSI(f"{spinner.inline_spinner_ansi()}\n{base}")
+
+    async def _wait_for_dispatch(turn_done: asyncio.Future[None]) -> None:
+        """Block the prompt loop until the current dispatch settles.
+
+        No ``prompt_async`` is active during this wait, so no prompt frame
+        is rendered — the terminal shows only the streamed response.
+
+        The spinner is printed as a regular stdout line that animates in
+        place (``\\r``) until the first LLM token arrives, then it is
+        committed with a newline and the streaming response continues below
+        it.
+
+        * ``Ctrl+C`` / ``CancelledError`` → cancels the dispatch and returns.
+        * Confirmation requests (``Proceed? [y/N]``) → briefly re-enters
+          ``prompt_async`` with a minimal y/N frame, then resumes waiting.
+        """
+        # One event-loop yield so that _run_one_dispatch can start and
+        # call spinner.start() before we first check spinner state.
+        await asyncio.sleep(0)
+
+        spinner_committed = False  # True once we emitted a final \\n for the spinner line
+        last_bytes = -1  # sentinel: "not yet printed"
+
+        def _write_spinner(commit: bool = False) -> None:
+            nonlocal spinner_committed, last_bytes
+            if spinner_committed or not spinner.streaming:
+                return
+            frame = spinner.inline_spinner_ansi()
+            if last_bytes == -1:
+                # First write — no prior line to overwrite.
+                sys.stdout.write(frame)
+            else:
+                # Overwrite the previous spinner frame in-place.
+                sys.stdout.write(f"\r\x1b[2K{frame}")
+            if commit or spinner.bytes_in > 0:
+                # Response has started (or we're done) — lock the line.
+                sys.stdout.write("\n")
+                spinner_committed = True
+            sys.stdout.flush()
+            last_bytes = spinner.bytes_in
+
+        while not turn_done.done():
+            if state.is_awaiting_confirmation():
+                _write_spinner(commit=True)
+                try:
+                    answer = await pt_session.prompt_async(
+                        message=ANSI(f"{ANSI_DIM}❯ {ANSI_RESET}"),
+                        bottom_toolbar=ANSI(
+                            f"{ANSI_DIM}y/N to confirm · Ctrl+C to cancel{ANSI_RESET}"
+                        ),
+                        refresh_interval=_PROMPT_REFRESH_INTERVAL_S,
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    state.cancel_current_dispatch()
+                    break
+                if _looks_like_confirmation_answer(answer):
+                    state.deliver_confirmation(answer or "")
+                # Non-y/n: loop — redisplay the confirmation prompt
+                continue
+
+            _write_spinner()
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(turn_done),
+                    timeout=_PROMPT_REFRESH_INTERVAL_S,
+                )
+                _write_spinner(commit=True)
+                return
+            except TimeoutError:
+                pass  # tick — animate spinner, check confirmation state
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                _write_spinner(commit=True)
+                state.cancel_current_dispatch()
+                # Give the worker a moment to print "· interrupted".
+                # SIM105 suppressed: bare ``await`` inside ``contextlib.suppress``
+                # is flagged by CodeQL as "statement has no effect".
+                try:  # noqa: SIM105
+                    await asyncio.wait_for(asyncio.shield(turn_done), timeout=2.0)
+                except Exception:
+                    pass
+                return
 
     processor_task = asyncio.create_task(_processor())
     alert_watcher_task = asyncio.create_task(_alert_watcher())
@@ -956,6 +1053,7 @@ async def _run_interactive(
                     text = await pt_session.prompt_async(
                         message=_message_with_spinner,
                         bottom_toolbar=spinner.toolbar_ansi,
+                        placeholder=_prompt_surface._PLACEHOLDER_ANSI,
                         refresh_interval=_PROMPT_REFRESH_INTERVAL_S,
                     )
                 except EOFError:
@@ -979,53 +1077,16 @@ async def _run_interactive(
                 if state.exit_requested:
                     return
 
-                # Bare ``/cancel``/``/stop``/``/abort`` while a dispatch
-                # is active: route through the same path as ``Esc``
-                # (``state.cancel_current_dispatch()``) instead of
-                # queueing the slash. Queueing a cancel behind the
-                # dispatch that's *causing* the spinner to spin is a
-                # deadlock from the user's perspective — the queued
-                # ``/cancel`` only runs once the parked dispatch
-                # finishes, which is exactly what they're trying to
-                # interrupt. ``/cancel <task_id>`` with arguments is
-                # intentionally NOT matched by the recognizer so the
-                # existing targeted background-task cancel still flows
-                # through the normal slash-dispatch path.
-                if state.is_dispatch_running() and _looks_like_cancel_request(text):
-                    stripped = (text or "").strip()
-                    render_submitted_prompt(echo_console, session, stripped)
-                    state.cancel_current_dispatch()
-                    continue
-
-                # If a worker thread is parked on a confirmation prompt,
-                # the next text the user submits *might* be the answer
-                # to that prompt — but only if it actually reads like a
-                # y/n token. Type-ahead text the user submitted while
-                # the action plan was still being parsed (e.g. a
-                # follow-up question) used to get silently consumed as
-                # the answer and decline the pending action; queue
-                # those as a normal turn instead and leave the
-                # confirmation parked for an explicit answer.
-                if state.is_awaiting_confirmation():
-                    if _looks_like_confirmation_answer(text):
-                        state.deliver_confirmation(text or "")
-                        continue
-                    echo_console.print(
-                        f"[{DIM}](type y/N to confirm the pending action; "
-                        "your input has been queued for after)[/]"
-                    )
-                    stripped = (text or "").strip()
-                    if stripped:
-                        render_submitted_prompt(echo_console, session, stripped)
-                        await state.queue.put(stripped)
-                    continue
-
                 stripped = (text or "").strip()
                 if not stripped:
                     continue
 
                 render_submitted_prompt(echo_console, session, stripped)
-                await state.queue.put(stripped)
+                turn_done: asyncio.Future[None] = main_loop.create_future()
+                await state.queue.put((stripped, turn_done))
+                # Block here — no new prompt until the dispatch finishes.
+                # Ctrl+C cancels; confirmations are served inline.
+                await _wait_for_dispatch(turn_done)
     finally:
         state.exit_requested = True
         state.cancel_current_dispatch()
