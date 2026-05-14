@@ -83,8 +83,20 @@ def format_token_count_short(token_count: int) -> str:
     return str(token_count)
 
 
-def _format_tokens(token_count: int) -> str:
-    return f"{format_token_count_short(token_count)} tokens"
+def _format_tokens(token_count: int, *, approximate: bool = False) -> str:
+    n = format_token_count_short(token_count)
+    if approximate:
+        return f"~{n} tokens (est.)"
+    return f"{n} tokens"
+
+
+def _format_footer_elapsed_s(elapsed: float) -> str:
+    """Format stream duration without ``0.0s`` for sub-100ms transfers."""
+    if elapsed >= 10.0:
+        return f"{elapsed:.1f}"
+    if elapsed >= 1.0:
+        return f"{elapsed:.1f}"
+    return f"{elapsed:.2f}"
 
 
 def stream_to_console(
@@ -294,10 +306,20 @@ def stream_to_console(
         # Render whatever's left in the paragraph buffer so the user
         # sees the full response even if it didn't end on ``\n\n``.
         _flush_paragraphs(force=True)
-        elapsed = time.monotonic() - started
+        hook = getattr(console, "repl_turn_elapsed_s", None)
+        if callable(hook):
+            elapsed = hook(started)
+        else:
+            elapsed = time.monotonic() - started
+        elapsed_s = _format_footer_elapsed_s(elapsed)
         if buffer:
-            tokens = _format_tokens(total_bytes // _CHARS_PER_TOKEN)
-            console.print(f"[{DIM}]· {elapsed:.1f}s · ↓ {tokens}[/]")
+            # ``total_bytes // _CHARS_PER_TOKEN`` is a character heuristic — not
+            # provider-reported usage.
+            tokens = _format_tokens(
+                total_bytes // _CHARS_PER_TOKEN,
+                approximate=True,
+            )
+            console.print(f"[{DIM}]· {elapsed_s}s · ↓ {tokens}[/]")
         console.print()
 
     return "".join(buffer)

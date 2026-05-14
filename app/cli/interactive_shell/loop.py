@@ -705,6 +705,10 @@ class _StreamingConsole(Console):
     ``wipe_stdout_wait_spinner_line`` removes the REPL wait line drawn on
     ``sys.stdout`` immediately before the first streamed ``console.print``
     so the verb line does not remain in scrollback.
+
+    ``repl_turn_elapsed_s`` aligns the dim footer duration with
+    :meth:`_SpinnerState.start` so ``· Ns`` reflects the full turn, not
+    only the tail of :func:`stream_to_console`.
     """
 
     def __init__(
@@ -744,6 +748,19 @@ class _StreamingConsole(Console):
         """
         sys.stdout.write("\r\x1b[2K")
         sys.stdout.flush()
+
+    def repl_turn_elapsed_s(self, stream_local_started: float) -> float:
+        """Wall seconds for the dim footer: from :meth:`_SpinnerState.start`.
+
+        ``stream_to_console`` sets its own ``started`` after the wipe/header,
+        which misses queue + pre-first-chunk wait and often rounds to
+        ``0.0s``. When the per-turn spinner is active, measure from
+        ``spinner.started_at`` so the footer matches the full turn.
+        """
+        now = time.monotonic()
+        if self._spinner.streaming and self._spinner.started_at > 0.0:
+            return max(0.0, now - self._spinner.started_at)
+        return max(0.0, now - stream_local_started)
 
 
 async def _run_interactive(

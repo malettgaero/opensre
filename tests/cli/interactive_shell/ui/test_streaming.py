@@ -102,6 +102,8 @@ class TestTtyParagraphRender:
         # End-of-stream force-flush rendered Markdown — ``**`` stripped.
         assert "**opensre" not in output
         assert "opensre investigate" in output
+        # Footer: byte-derived token estimate + elapsed (see ``stream_to_console``).
+        assert "(est.)" in output
 
     def test_invokes_wipe_stdout_wait_spinner_hook_once(self) -> None:
         """Interactive REPL consoles expose ``wipe_stdout_wait_spinner_line`` so the
@@ -122,6 +124,23 @@ class TestTtyParagraphRender:
             chunks=_yield_chunks(["hi"]),
         )
         assert len(wipe_calls) == 1
+
+    def test_footer_uses_repl_turn_elapsed_when_hook_present(self) -> None:
+        buf = io.StringIO()
+
+        class _ElapsedHookConsole(Console):
+            def repl_turn_elapsed_s(self, stream_start: float) -> float:  # noqa: ARG002
+                return 42.5
+
+        console = _ElapsedHookConsole(
+            file=buf, force_terminal=True, color_system=None, width=80, highlight=False
+        )
+        stream_to_console(
+            console,
+            label="assistant",
+            chunks=_yield_chunks(["body"]),
+        )
+        assert "42.5s" in _strip_ansi(buf.getvalue())
 
     def test_renders_first_paragraph_before_second_completes(self) -> None:
         """A complete paragraph (``\\n\\n``) flushes immediately, even
