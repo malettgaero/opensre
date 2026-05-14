@@ -65,7 +65,7 @@ def run_watchdog(
                 )
                 if dispatcher.dispatch("max_cpu", msg):
                     _notify_alarm("max_cpu", detail)
-                fired_once = True
+                    fired_once = True
             if max_rss_mib is not None and snap.rss_mb >= max_rss_mib:
                 detail = f"{snap.rss_mb:.1f}MiB (threshold {max_rss_mib:g}MiB)"
                 msg = (
@@ -74,7 +74,7 @@ def run_watchdog(
                 )
                 if dispatcher.dispatch("max_rss", msg):
                     _notify_alarm("max_rss", detail)
-                fired_once = True
+                    fired_once = True
             if max_runtime_seconds is not None and runtime_s >= max_runtime_seconds:
                 detail = f"runtime {runtime_s:.0f}s (threshold {max_runtime_seconds:g}s)"
                 msg = (
@@ -83,7 +83,7 @@ def run_watchdog(
                 )
                 if dispatcher.dispatch("max_runtime", msg):
                     _notify_alarm("max_runtime", detail)
-                fired_once = True
+                    fired_once = True
 
             any_threshold = (
                 max_cpu is not None or max_rss_mib is not None or max_runtime_seconds is not None

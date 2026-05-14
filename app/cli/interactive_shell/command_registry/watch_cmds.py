@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -25,6 +27,7 @@ from app.watch_dog.alarms import AlarmDispatcher, load_credentials_from_env
 from app.watch_dog.monitor import start_watchdog_daemon_thread
 
 _PID_IN_COMMAND_RE = re.compile(r"pid=(\d+)")
+_CONSOLE_PRINT_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -123,8 +126,12 @@ def parse_watch_argv(argv: list[str]) -> WatchdogStartSpec | str:
                 pct = float(value)
             except ValueError:
                 return f"[{ERROR}]invalid --max-cpu:[/] {escape(value)}"
-            if pct <= 0 or pct > 100:
-                return f"[{ERROR}]--max-cpu must be between 0 and 100:[/] {pct}"
+            max_supported_cpu = 100.0 * float(max(1, os.cpu_count() or 1))
+            if pct <= 0 or pct > max_supported_cpu:
+                return (
+                    f"[{ERROR}]--max-cpu must be between 0 and {max_supported_cpu:g}:[/] "
+                    f"{pct}"
+                )
             max_cpu = pct
         elif token == "--max-runtime":
             seconds = _parse_duration_seconds(value)
@@ -205,10 +212,11 @@ def _cmd_watch(session: ReplSession, console: Console, args: list[str]) -> bool:
     dispatcher = AlarmDispatcher(creds, cooldown_seconds=parsed.cooldown_seconds)
 
     def _on_alarm(threshold: str, detail: str) -> None:
-        console.print(
-            f"[task {escape(task.task_id)}] alarm fired: {escape(threshold)} "
-            f"{escape(detail)} (telegram delivered)"
-        )
+        with _CONSOLE_PRINT_LOCK:
+            console.print(
+                f"[task {escape(task.task_id)}] alarm fired: {escape(threshold)} "
+                f"{escape(detail)} (telegram delivered)"
+            )
 
     start_watchdog_daemon_thread(
         task=task,

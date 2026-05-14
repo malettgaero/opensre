@@ -111,12 +111,12 @@ def dispatch_slash(
         return True
     name = parts[0].lower()
     if name in ("/watch", "/unwatch"):
-        from app.cli.interactive_shell.intent import intent_parser as _intent_parser
-
         head = parts[0]
         body = stripped[len(head) :].strip()
         try:
-            args = shlex.split(body, posix=not _intent_parser.IS_WINDOWS)
+            # Use POSIX mode on all platforms so quoted values are unwrapped
+            # consistently (e.g., --max-cpu "80" -> 80).
+            args = shlex.split(body, posix=True)
         except ValueError:
             args = body.split()
     else:
