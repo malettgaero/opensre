@@ -103,6 +103,26 @@ class TestTtyParagraphRender:
         assert "**opensre" not in output
         assert "opensre investigate" in output
 
+    def test_invokes_wipe_stdout_wait_spinner_hook_once(self) -> None:
+        """Interactive REPL consoles expose ``wipe_stdout_wait_spinner_line`` so the
+        transient wait line is erased before Rich prints the streamed reply."""
+        buf = io.StringIO()
+        wipe_calls: list[int] = []
+
+        class ConsoleWithWipe(Console):
+            def wipe_stdout_wait_spinner_line(self) -> None:
+                wipe_calls.append(1)
+
+        console = ConsoleWithWipe(
+            file=buf, force_terminal=True, color_system=None, width=80, highlight=False
+        )
+        stream_to_console(
+            console,
+            label="assistant",
+            chunks=_yield_chunks(["hi"]),
+        )
+        assert len(wipe_calls) == 1
+
     def test_renders_first_paragraph_before_second_completes(self) -> None:
         """A complete paragraph (``\\n\\n``) flushes immediately, even
         when more chunks would still arrive after it. The second

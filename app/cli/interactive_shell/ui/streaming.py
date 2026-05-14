@@ -143,6 +143,9 @@ def stream_to_console(
                 return "".join(peeked) + "".join(drained)
             break
 
+    wipe = getattr(console, "wipe_stdout_wait_spinner_line", None)
+    if callable(wipe):
+        wipe()
     console.print()
     render_response_header(console, label)
 

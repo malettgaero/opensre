@@ -701,6 +701,10 @@ class _StreamingConsole(Console):
     chunks when the user presses Esc — ``asyncio.to_thread`` doesn't
     propagate task cancellation into the worker thread, so without
     this signal the dispatch keeps streaming after Esc.
+
+    ``wipe_stdout_wait_spinner_line`` removes the REPL wait line drawn on
+    ``sys.stdout`` immediately before the first streamed ``console.print``
+    so the verb line does not remain in scrollback.
     """
 
     def __init__(
@@ -729,6 +733,17 @@ class _StreamingConsole(Console):
     @property
     def cancel_requested(self) -> bool:
         return self._cancel_event.is_set()
+
+    def wipe_stdout_wait_spinner_line(self) -> None:
+        """Erase the transient wait line drawn by :func:`_wait_for_dispatch`.
+
+        That line animates in-place on ``sys.stdout``; it must not remain in
+        scrollback once :func:`stream_to_console` renders the reply — the
+        worker always calls this hook immediately before the first
+        ``console.print()`` so ordering wins over the asyncio polling loop.
+        """
+        sys.stdout.write("\r\x1b[2K")
+        sys.stdout.flush()
 
 
 async def _run_interactive(
@@ -945,10 +960,12 @@ async def _run_interactive(
 
         The spinner is printed as a regular stdout line that animates in
         place (``\\r``) until the first LLM token arrives, then it is
-        committed and followed by a blank line; the streaming response
-        continues below. The wait line omits elapsed/token counts
-        (``wait_metrics=False``) so the reply footer remains the single
-        place for final timing and totals.
+        **erased** (``\\r`` + ``EL``) so it does not stay in scrollback —
+        :meth:`_StreamingConsole.wipe_stdout_wait_spinner_line` runs again in
+        :func:`~app.cli.interactive_shell.ui.streaming.stream_to_console`
+        before the first Rich ``print`` so ordering is safe. The wait line
+        omits elapsed/token counts (``wait_metrics=False``); the reply footer
+        holds final timing and totals.
 
         * ``Ctrl+C`` / ``CancelledError`` → cancels the dispatch and returns.
         * Confirmation requests (``Proceed? [y/N]``) → briefly re-enters
@@ -973,14 +990,12 @@ async def _run_interactive(
                 # Overwrite the previous spinner frame in-place.
                 sys.stdout.write(f"\r\x1b[2K{frame}")
             if commit or spinner.bytes_in > 0:
-                # Response has started (or we're done) — lock the line.
-                # One extra blank line before streamed body — separates the
-                # transient wait line from the assistant block (footer still
-                # carries timing + tokens when the reply completes).
+                # Lock the wait indicator: erase it entirely — it must not
+                # remain as "⠏ analysing…" in history once the reply renders.
                 if spinner.bytes_in > 0:
-                    sys.stdout.write("\n\n")
+                    sys.stdout.write("\r\x1b[2K")
                 else:
-                    sys.stdout.write("\n")
+                    sys.stdout.write("\r\x1b[2K\n")
                 spinner_committed = True
             sys.stdout.flush()
             last_bytes = spinner.bytes_in
