@@ -221,6 +221,36 @@ def test_detect_status_timeout_with_api_key(mock_which: MagicMock, mock_run: Mag
     assert "CURSOR_API_KEY" in probe.detail
 
 
+@patch("app.integrations.llm_cli.cursor.subprocess.run")
+@patch("app.integrations.llm_cli.binary_resolver.shutil.which")
+def test_detect_status_oserror_with_api_key_message(
+    mock_which: MagicMock, mock_run: MagicMock
+) -> None:
+    """Headless path must not claim timeout when the CLI raised OSError."""
+    mock_which.return_value = "agent"
+
+    def side_effect(args, **kwargs):
+        if "--version" in args:
+            return _version_proc()
+        if "status" in args:
+            raise OSError("exec format error")
+        return _fallback_proc()
+
+    mock_run.side_effect = side_effect
+
+    with patch.dict(
+        os.environ,
+        {"CURSOR_BIN": "agent", "CURSOR_API_KEY": "ck", "USERPROFILE": r"C:\Users\test"},
+        clear=True,
+    ):
+        probe = CursorAdapter().detect()
+
+    assert probe.installed is True
+    assert probe.logged_in is True
+    assert "failed" in probe.detail
+    assert "timed out" not in probe.detail.lower()
+
+
 @patch.dict(os.environ, {"CURSOR_API_KEY": ""}, clear=False)
 @patch("app.integrations.llm_cli.binary_resolver.shutil.which", return_value="agent")
 def test_build_adds_trust_workspace_and_model(mock_which: MagicMock) -> None:
