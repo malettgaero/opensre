@@ -165,6 +165,10 @@ class CLIBackedLLMClient:
         err = _strip_ansi(proc.stderr or "")
 
         if proc.returncode != 0:
+            # Exit code 130 = subprocess terminated by SIGINT (Ctrl+C); propagate as
+            # KeyboardInterrupt so it is treated as user-initiated cancellation.
+            if proc.returncode == 130:
+                raise KeyboardInterrupt(f"{self._adapter.name} CLI subprocess interrupted.")
             # Exit code 75 is EX_TEMPFAIL (sysexits.h) — a transient failure
             # the caller should retry. Raise CLITimeoutError so it is treated as
             # an expected operational failure and not forwarded to Sentry.
