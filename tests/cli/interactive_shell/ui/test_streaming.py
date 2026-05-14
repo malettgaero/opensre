@@ -130,7 +130,7 @@ class TestTtyParagraphRender:
 
         class _ElapsedHookConsole(Console):
             def repl_turn_elapsed_s(self, stream_start: float) -> float:  # noqa: ARG002
-                return 42.5
+                return 8.5
 
         console = _ElapsedHookConsole(
             file=buf, force_terminal=True, color_system=None, width=80, highlight=False
@@ -140,7 +140,15 @@ class TestTtyParagraphRender:
             label="assistant",
             chunks=_yield_chunks(["body"]),
         )
-        assert "42.5s" in _strip_ansi(buf.getvalue())
+        assert "8.5s" in _strip_ansi(buf.getvalue())
+
+    def test_format_footer_elapsed_s_tiers(self) -> None:
+        from app.cli.interactive_shell.ui import streaming as streaming_module
+
+        assert streaming_module._format_footer_elapsed_s(0.03) == "0.03"
+        assert streaming_module._format_footer_elapsed_s(2.567) == "2.6"
+        assert streaming_module._format_footer_elapsed_s(42.5) == "42"
+        assert streaming_module._format_footer_elapsed_s(120.4) == "120"
 
     def test_renders_first_paragraph_before_second_completes(self) -> None:
         """A complete paragraph (``\\n\\n``) flushes immediately, even

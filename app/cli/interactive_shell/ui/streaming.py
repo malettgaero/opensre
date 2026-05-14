@@ -93,7 +93,7 @@ def _format_tokens(token_count: int, *, approximate: bool = False) -> str:
 def _format_footer_elapsed_s(elapsed: float) -> str:
     """Format stream duration without ``0.0s`` for sub-100ms transfers."""
     if elapsed >= 10.0:
-        return f"{elapsed:.1f}"
+        return f"{elapsed:.0f}"
     if elapsed >= 1.0:
         return f"{elapsed:.1f}"
     return f"{elapsed:.2f}"
