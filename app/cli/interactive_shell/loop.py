@@ -669,23 +669,28 @@ class _SpinnerState:
                 hint += "  ·  esc to clear"
         return ANSI(f"{ANSI_DIM}{hint}{ANSI_RESET}")
 
-    def inline_spinner_ansi(self) -> str:
+    def inline_spinner_ansi(self, *, wait_metrics: bool = True) -> str:
         """Single-line ``⠋ thinking… (Ns · ↓ X tokens)`` indicator, or
         empty string when not streaming. Consumed by
         :func:`_message_with_spinner` and pinned above the input rule,
         so the spinner appears at the visual end of the response
         stream while the input cursor stays anchored below it.
+
+        When ``wait_metrics`` is False, only the glyph and verb are
+        rendered (no elapsed seconds or token counts). The stdout wait
+        line uses this so timing and totals are not duplicated — the
+        rendered reply footer already reports ``· Ns · ↓ X tokens``.
         """
         if not self.streaming:
             return ""
-        elapsed = time.monotonic() - self.started_at
-        tokens_str = format_token_count_short(self.bytes_in // _CHARS_PER_TOKEN)
         glyph = self._SPINNER_FRAMES[self._frame_idx % len(self._SPINNER_FRAMES)]
         self._frame_idx += 1
-        return (
-            f"{PROMPT_ACCENT_ANSI}{glyph} {self._verb}…{ANSI_RESET}"
-            f"{ANSI_DIM} ({elapsed:.0f}s · ↓ {tokens_str} tokens){ANSI_RESET}"
-        )
+        accent = f"{PROMPT_ACCENT_ANSI}{glyph} {self._verb}…{ANSI_RESET}"
+        if not wait_metrics:
+            return accent
+        elapsed = time.monotonic() - self.started_at
+        tokens_str = format_token_count_short(self.bytes_in // _CHARS_PER_TOKEN)
+        return f"{accent}{ANSI_DIM} ({elapsed:.0f}s · ↓ {tokens_str} tokens){ANSI_RESET}"
 
 
 class _StreamingConsole(Console):
@@ -940,8 +945,10 @@ async def _run_interactive(
 
         The spinner is printed as a regular stdout line that animates in
         place (``\\r``) until the first LLM token arrives, then it is
-        committed with a newline and the streaming response continues below
-        it.
+        committed and followed by a blank line; the streaming response
+        continues below. The wait line omits elapsed/token counts
+        (``wait_metrics=False``) so the reply footer remains the single
+        place for final timing and totals.
 
         * ``Ctrl+C`` / ``CancelledError`` → cancels the dispatch and returns.
         * Confirmation requests (``Proceed? [y/N]``) → briefly re-enters
@@ -958,7 +965,7 @@ async def _run_interactive(
             nonlocal spinner_committed, last_bytes
             if spinner_committed or not spinner.streaming:
                 return
-            frame = spinner.inline_spinner_ansi()
+            frame = spinner.inline_spinner_ansi(wait_metrics=False)
             if last_bytes == -1:
                 # First write — no prior line to overwrite.
                 sys.stdout.write(frame)
@@ -967,7 +974,13 @@ async def _run_interactive(
                 sys.stdout.write(f"\r\x1b[2K{frame}")
             if commit or spinner.bytes_in > 0:
                 # Response has started (or we're done) — lock the line.
-                sys.stdout.write("\n")
+                # One extra blank line before streamed body — separates the
+                # transient wait line from the assistant block (footer still
+                # carries timing + tokens when the reply completes).
+                if spinner.bytes_in > 0:
+                    sys.stdout.write("\n\n")
+                else:
+                    sys.stdout.write("\n")
                 spinner_committed = True
             sys.stdout.flush()
             last_bytes = spinner.bytes_in

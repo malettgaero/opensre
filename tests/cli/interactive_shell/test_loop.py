@@ -759,6 +759,18 @@ class TestSpinnerState:
         # Spinner glyph from the brail palette.
         assert any(g in rendered for g in spinner._SPINNER_FRAMES)
 
+    def test_streaming_inline_spinner_omits_metrics_when_disabled(self) -> None:
+        """Stdout wait line uses ``wait_metrics=False`` — avoids duplicating
+        counts the reply footer prints when streaming ends."""
+        spinner = loop._SpinnerState()
+        spinner.start()
+        spinner.bytes_in = 1234 * loop._CHARS_PER_TOKEN
+        rendered = _strip_ansi(spinner.inline_spinner_ansi(wait_metrics=False))
+        assert "tokens" not in rendered
+        assert "(" not in rendered
+        assert any(f"{verb}…" in rendered for verb in spinner._THINKING_VERBS)
+        assert any(g in rendered for g in spinner._SPINNER_FRAMES)
+
     def test_streaming_inline_spinner_verb_stays_constant_across_calls(self) -> None:
         """A turn's verb is fixed at ``start()`` so the indicator
         doesn't flicker between words mid-stream."""
