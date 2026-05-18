@@ -105,24 +105,20 @@ class BaseTool(ABC):
             ToolResult with success/failure information.
         """
         if not self.is_available():
-            logger.warning("Tool '%s' is not available", self.tool_name)
-            return ToolResult.fail(f"Tool '{self.tool_name}' is not available")
+            logger.warning("Tool '%s' is not available.", self.tool_name)
+            return ToolResult.fail(
+                f"Tool '{self.tool_name}' is not available. "
+                "Check that all required dependencies and credentials are configured."
+            )
 
         params = self.extract_params(raw)
         if not params.is_valid:
-            logger.debug(
-                "Tool '%s' param validation failed: %s",
-                self.tool_name,
-                params.errors,
-            )
+            # Log each validation error at debug level for easier troubleshooting
+            for err in params.errors:
+                logger.debug("[%s] param error: %s", self.tool_name, err)
             return ToolResult.fail(
-                f"Invalid params for '{self.tool_name}': {'; '.join(params.errors)}"
+                f"Invalid params for '{self.tool_name}': " + "; ".join(params.errors)
             )
 
-        try:
-            result = self.run(params)
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.exception("Tool '%s' raised an unexpected error", self.tool_name)
-            return ToolResult.fail(str(exc))
-
-        return result
+        logger.debug("Running tool '%s' with params: %s", self.tool_name, params.validated)
+        return self.run(params)
